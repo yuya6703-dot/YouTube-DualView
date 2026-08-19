@@ -946,6 +946,47 @@ function parseCommentThread(el: Element): FeedItem | null {
   }
 }
 
+/**
+ * アイコン画像が未取得のまま配信されたコメントを、後から読み直して送り直す。
+ *
+ * ★ コメントはMutationObserverが見つけた瞬間に1回だけ解析される。ところが
+ *   YouTubeはその直後に`<img>`の`src`を埋めるため、解析時点ではまだ空のことが多く、
+ *   そのまま配信するとサブ画面にアイコンが出ないまま固定される
+ *   （2026-08-19 実機で、20件中1件しかアイコンが出ない状態として報告）。
+ *   DOMを一切変更しない純粋な読み直しなので、プレイヤーへの副作用はない。
+ */
+const AVATAR_BACKFILL_DELAYS_MS = [600, 1800, 4000] as const
+
+function scheduleAvatarBackfill(threads: Element[]) {
+  const pending = threads.filter((el) => {
+    const cached = commentItemCache.get(getStableCommentId(el) ?? "")
+    return cached !== undefined && !cached.avatarUrl
+  })
+  if (pending.length === 0) return
+
+  for (const delay of AVATAR_BACKFILL_DELAYS_MS) {
+    window.setTimeout(() => {
+      if (ports.size === 0) return
+      const filled: FeedItem[] = []
+      for (const el of pending) {
+        if (!document.contains(el)) continue
+        const id = getStableCommentId(el)
+        if (!id) continue
+        const cached = commentItemCache.get(id)
+        if (!cached || cached.avatarUrl) continue // 既に埋まっていれば何もしない
+        const avatarUrl = q<HTMLImageElement>(SELECTORS.comments.avatar, el)?.src ?? ""
+        if (!avatarUrl) continue
+        const updated = { ...cached, avatarUrl }
+        commentItemCache.set(id, updated)
+        filled.push(updated)
+      }
+      if (filled.length > 0) {
+        emit({ type: "FEED_APPEND", payload: { kind: "comment", items: filled } })
+      }
+    }, delay)
+  }
+}
+
 function emitUnseenCommentThreads(threads: Element[]) {
   const fresh: FeedItem[] = []
   for (const el of threads) {
@@ -957,7 +998,10 @@ function emitUnseenCommentThreads(threads: Element[]) {
     commentItemCache.set(item.id, item)
     fresh.push(item)
   }
-  if (fresh.length > 0) emit({ type: "FEED_APPEND", payload: { kind: "comment", items: fresh } })
+  if (fresh.length > 0) {
+    emit({ type: "FEED_APPEND", payload: { kind: "comment", items: fresh } })
+    scheduleAvatarBackfill(threads)
+  }
 }
 
 function flushCommentEmit() {

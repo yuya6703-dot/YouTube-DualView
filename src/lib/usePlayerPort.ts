@@ -148,7 +148,19 @@ export function usePlayerPort() {
       if (ev.type === "FEED_APPEND") {
         feedKindRef.current = ev.payload.kind
         setFeed((prev) => {
-          const merged = [...prev, ...ev.payload.items]
+          // ★ 同じidが再送されたら「追加」ではなく「更新」する。
+          //   コメントは発見した瞬間に1回だけ解析されるため、YouTubeが
+          //   アイコン画像のsrcを入れる前に読むと空のまま固定されてしまう。
+          //   CS側が後からアイコンを埋めて送り直せるよう、upsertにしておく。
+          const index = new Map(prev.map((item, i) => [item.id, i]))
+          const updated = prev.slice()
+          const added: FeedItem[] = []
+          for (const item of ev.payload.items) {
+            const at = index.get(item.id)
+            if (at === undefined) added.push(item)
+            else updated[at] = item
+          }
+          const merged = added.length > 0 ? [...updated, ...added] : updated
           // 通常コメントは「サブだけで最後まで遡れる」ことを優先して全件保持する。
           // 将来ライブチャットを再実装した場合だけ、流れ続けるデータへ保持上限を適用する。
           if (ev.payload.kind === "comment") return merged
