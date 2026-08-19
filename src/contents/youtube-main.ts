@@ -1584,6 +1584,54 @@ chrome.runtime.onConnect.addListener((port) => {
  * 既存の実リンクがある場合だけ、そのリンクが持つYouTube側のclick処理を使う。
  * 実リンクが無いときは、SPAを装った素anchorではなく通常遷移で確実性を優先する。
  */
+/**
+ * YouTube自身のSPAルーター(`ytd-app`の`yt-navigate`)へ遷移を依頼する。
+ * 対象動画のアンカーがDOMに無い場合（フルスクリーン中など）の受け皿。
+ *
+ * ★ Content Scriptは隔離ワールドで動くため、CustomEventのdetailがページ側へ
+ *   構造化複製されて届くかは環境依存の面がある。届かなければ何も起きないので、
+ *   一定時間後に実際に遷移したかを確認し、駄目なら通常遷移へ落とす
+ *   （フルスクリーンは失われるが、「動画が変わらない」よりはましという判断）。
+ */
+function navigateViaYouTubeRouter(
+  videoId: string,
+  url: URL,
+  startSeconds: number,
+  generation: number
+) {
+  const app = document.querySelector("ytd-app")
+  if (!app) {
+    location.assign(url.href)
+    return
+  }
+
+  app.dispatchEvent(new CustomEvent("yt-navigate", {
+    detail: {
+      endpoint: {
+        commandMetadata: {
+          webCommandMetadata: {
+            url: url.pathname + url.search,
+            webPageType: "WEB_PAGE_TYPE_WATCH",
+            rootVe: 3832
+          }
+        },
+        watchEndpoint: { videoId }
+      }
+    },
+    bubbles: true,
+    composed: true
+  }))
+
+  window.setTimeout(() => {
+    if (generation !== navigationCommandGeneration) return
+    if (getVideoId() === videoId) {
+      if (startSeconds > 0) seekAfterNavigation(videoId, startSeconds, generation)
+      return
+    }
+    location.assign(url.href)
+  }, 700)
+}
+
 function navigateToVideo(videoId: string, generation: number, startSeconds?: number) {
   const url = new URL("/watch", location.origin)
   url.searchParams.set("v", videoId)
@@ -1600,7 +1648,13 @@ function navigateToVideo(videoId: string, generation: number, startSeconds?: num
     `a[href*="/watch?v=${CSS.escape(videoId)}"]`
   )
   if (!existing) {
-    location.assign(url.href)
+    // ★ メイン画面がフルスクリーンだと関連動画欄が描画されず、対象動画のアンカーが
+    //   DOMに存在しないことがある。ここで location.assign() するとページ全体が
+    //   再読み込みされ、フルスクリーンが必ず解除される（2026-08-19 実機で報告）。
+    //   YouTube自身のSPAルーターを直接叩けばアンカー無しでも遷移でき、
+    //   実DOM検証では #movie_player と <video> の要素同一性が保たれるため
+    //   フルスクリーンも維持される（YouTube側がexitFullscreen()を呼ばないことも確認済み）。
+    navigateViaYouTubeRouter(videoId, url, normalizedStartSeconds, generation)
     return
   }
 
