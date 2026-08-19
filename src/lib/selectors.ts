@@ -288,6 +288,39 @@ function resolveCommentLinkHref(raw: string | null): string | null {
   }
 }
 
+/** "83s" / "83" / "1h2m3s" 形式（YouTubeのtパラメータ）を秒数へ変換する。 */
+function parseYouTubeTimeParam(raw: string): number | null {
+  if (/^\d+$/.test(raw)) return Number(raw)
+  const match = raw.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/)
+  if (!match || (!match[1] && !match[2] && !match[3])) return null
+  const [, h, m, s] = match
+  return Number(h ?? 0) * 3600 + Number(m ?? 0) * 60 + Number(s ?? 0)
+}
+
+/**
+ * コメント中のリンクが「今見ている動画の特定時刻」を指しているかを判定する。
+ * ★ 動画IDが現在のページと一致する場合だけタイムスタンプ扱いにする。
+ *   別動画へのリンクはメインの再生位置を飛ばす対象にならないため、通常のリンクとして扱う。
+ */
+function parseCommentTimestampHref(raw: string): number | null {
+  try {
+    const url = new URL(raw, location.href)
+    const host = url.hostname.toLowerCase()
+    const isYouTube =
+      host === "youtube.com" || host === "www.youtube.com" || host.endsWith(".youtube.com")
+    if (!isYouTube || url.pathname !== "/watch") return null
+    const videoId = url.searchParams.get("v")
+    const currentVideoId = new URLSearchParams(location.search).get("v")
+    if (!videoId || !currentVideoId || videoId !== currentVideoId) return null
+    const tParam = url.searchParams.get("t")
+    if (tParam) return parseYouTubeTimeParam(tParam)
+    const hashMatch = url.hash.match(/t=(\d+)/)
+    return hashMatch ? Number(hashMatch[1]) : null
+  } catch {
+    return null
+  }
+}
+
 export function toTokens(el: Element | null): RichTokenLocal[] {
   if (!el) return []
   const tokens: RichTokenLocal[] = []
@@ -299,12 +332,19 @@ export function toTokens(el: Element | null): RichTokenLocal[] {
       // カスタム絵文字/メンバー絵文字は img で表現される
       tokens.push({ t: "emoji", url: node.src, alt: node.alt || "emoji" })
     } else if (node instanceof HTMLAnchorElement) {
-      // ★ <a> は平坦化せずリンクとして残す。中身を展開してしまうと href が失われ、
-      //   省略表示されたテキストしか手元に残らない（＝正しいURLを復元できない）。
-      const href = resolveCommentLinkHref(node.getAttribute("href"))
+      // ★ <a> は平坦化せずリンク/タイムスタンプとして残す。中身を展開してしまうと
+      //   href が失われ、省略表示されたテキストしか手元に残らない
+      //   （＝正しいURLや秒数を復元できない）。
+      const rawHref = node.getAttribute("href")
       const v = node.textContent ?? ""
-      if (href && v) tokens.push({ t: "link", href, v })
-      else tokens.push(...toTokens(node))
+      const seconds = rawHref ? parseCommentTimestampHref(rawHref) : null
+      if (seconds !== null && v) {
+        tokens.push({ t: "timestamp", seconds, v })
+      } else {
+        const href = resolveCommentLinkHref(rawHref)
+        if (href && v) tokens.push({ t: "link", href, v })
+        else tokens.push(...toTokens(node))
+      }
     } else if (node instanceof Element) {
       tokens.push(...toTokens(node)) // <span> のネストを平坦化
     }
@@ -317,6 +357,7 @@ type RichTokenLocal =
   | { t: "text"; v: string }
   | { t: "emoji"; url: string; alt: string }
   | { t: "link"; href: string; v: string }
+  | { t: "timestamp"; seconds: number; v: string }
 
 /* ============================================================
  * 生存確認（セレクタが壊れたときの一次切り分け）
@@ -413,7 +454,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 36
+export const DIAGNOSE_VERSION = 37
 
 export type DiagnoseReport = {
   v: number

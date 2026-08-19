@@ -56,6 +56,9 @@ export type RichToken =
   // ★ 表示テキスト(v)は当てにできない。YouTubeは長いURLを「…」で省略して表示するため、
   //   テキストから組み立て直すと壊れたURLになる。必ずhrefを使うこと。
   | { t: "link"; href: string; v: string }
+  // コメント中の「同じ動画」を指すタイムスタンプ（例: "1:23"）。
+  // 別タブで開くのではなく、メイン画面の再生位置をここへ飛ばす。
+  | { t: "timestamp"; seconds: number; v: string }
 
 export type FeedKind = "comment" | "chat"
 

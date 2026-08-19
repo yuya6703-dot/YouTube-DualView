@@ -1534,7 +1534,7 @@ function CommentRow({ item, size, tabId, isReply = false }: {
           {item.publishedAt && <span className="shrink-0 text-neutral-600">{item.publishedAt}</span>}
         </p>
         <p className={`mt-0.5 whitespace-pre-wrap break-words leading-snug text-neutral-300 ${cls.body}`}>
-          <CommentBody item={item} />
+          <CommentBody item={item} tabId={tabId} />
         </p>
 
         <div className="mt-1 flex items-center gap-3">
@@ -1646,7 +1646,7 @@ function CommentRow({ item, size, tabId, isReply = false }: {
  * ★ 素の target="_blank" は使わない。サブ画面は type:"popup" の特殊ウィンドウなので、
  *   通常タブではなく別のポップアップとして開かれることがある。
  */
-function CommentBody({ item }: { item: FeedItem }) {
+function CommentBody({ item, tabId }: { item: FeedItem; tabId: number | null }) {
   if (item.tokens.length === 0) return <>{item.text}</>
   return (
     <>
@@ -1660,6 +1660,23 @@ function CommentBody({ item }: { item: FeedItem }) {
               alt={token.alt}
               className="inline-block h-4 w-4 align-text-bottom"
             />
+          )
+        }
+        if (token.t === "timestamp") {
+          return (
+            <a
+              key={index}
+              href="#"
+              // 別タブは開かず、メイン画面をその時刻へシークする
+              onClick={(e) => {
+                e.preventDefault()
+                if (tabId !== null) {
+                  void askContent(tabId, "PLAYER_COMMAND", { command: "seek", value: token.seconds })
+                }
+              }}
+              className="text-sky-400 underline underline-offset-2 transition hover:text-sky-300">
+              {token.v}
+            </a>
           )
         }
         return (
