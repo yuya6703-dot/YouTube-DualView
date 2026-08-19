@@ -26,7 +26,7 @@ jobs:
       # pnpm@11.21.0（package.jsonのpackageManager指定）はNode.js v22.13未満だと
       # `import { styleText } from "node:util"` で SyntaxError を起こして即クラッシュする。
       # ローカルはNode v24系なので気づかなかったが、CIでは明示的に満たす必要がある。
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22.13"
       # ★キャッシュ（setup-nodeの cache:pnpm / actions/cache 手動構成のどちらも）は
