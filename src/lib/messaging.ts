@@ -121,6 +121,12 @@ export type Contract = {
   // 返信欄を開く。メイン画面でまだ展開されていなければクリックして展開させ、
   // 展開済みならクリックせずそのまま読み出す（誤って畳んでしまわないため）
   COMMENT_LOAD_REPLIES: { req: { commentId: string }; res: { items: FeedItem[] } }
+  // 新規コメントの投稿。成功すればコメント本体の自動監視(FEED_APPEND)が
+  // 自然に新着として拾うため、ここでは成否だけ返す。
+  COMMENT_POST: { req: { text: string };              res: { ok: boolean } }
+  // 返信の投稿。返信は自動監視の対象外（COMMENT_LOAD_REPLIESと同じくオンデマンド取得）
+  // なので、投稿後の最新の返信一覧をこちらから返してPopout側の状態を更新させる。
+  COMMENT_REPLY: { req: { commentId: string; text: string }; res: { ok: boolean; items: FeedItem[] } }
   DIAGNOSE_SELECTORS: { req: void;                    res: DiagnoseReport }
 
   /* --- 受け手: Service Worker --- */
