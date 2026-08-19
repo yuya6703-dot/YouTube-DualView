@@ -122,21 +122,65 @@ export const SELECTORS = {
     avatar: ["#author-thumbnail img", "#img"],
     body: ["#content-text"],
     published: ["#published-time-text a", "#published-time-text"],
-    // ★ 実機未検証（2026-08-19時点）。診断結果を見て候補配列を実物に合わせて直すこと。
+    // 実機確認済み（2026-08-19）
     likeButton: [
       "#like-button button",
       "ytd-comment-engagement-bar #like-button button",
       "#toolbar #like-button button"
     ],
-    // 返信を開閉する「N件の返信」ボタン。押すたびに開閉がトグルされる想定。
+    // 返信を開く「N件の返信」ボタン。
+    // ★ 2026-08-19の実機確認で判明: YouTubeは新しいスレッド表示UI（yt-sub-thread、
+    //   `#collapsed-threads`/`#expanded-threads`）に切り替わっており、旧UIの
+    //   `#expander`配下の`#more-replies`は`hidden`属性付きでDOM上に残るだけの
+    //   非対話要素になっていた（クリックしても何も起きない）。実際に押せるボタンは
+    //   `#collapsed-threads`側の`#more-replies-sub-thread`。旧UIがA/Bテストで
+    //   残っている場合に備えて旧候補もフォールバックとして残す。
     replyToggle: [
+      "#replies #collapsed-threads #more-replies-sub-thread button",
       "#replies #more-replies button",
       "ytd-comment-replies-renderer #more-replies button",
       "#replies tp-yt-paper-button#more-replies"
     ],
-    replyCountText: ["#replies #more-replies", "ytd-comment-replies-renderer #more-replies"],
+    replyCountText: [
+      "#replies #collapsed-threads #more-replies-sub-thread",
+      "#replies #more-replies",
+      "ytd-comment-replies-renderer #more-replies"
+    ],
     // 展開後、返信欄の中に並ぶ個々のコメント（トップレベルの thread とは別の入れ子構造）
-    replyItem: ["ytd-comment-replies-renderer ytd-comment-view-model", "#replies ytd-comment-view-model"]
+    replyItem: ["ytd-comment-replies-renderer ytd-comment-view-model", "#replies ytd-comment-view-model"],
+    // 展開ボタンを押した直後に現れる、返信本体のプレースホルダ（ghost cards）。
+    // related動画/コメント本体と同じくIntersectionObserverで遅延読み込みされるため、
+    // nudgeIntoViewport()で刺激する対象として使う。
+    repliesContinuation: [
+      "ytd-continuation-item-renderer.replies-continuation",
+      "#expanded-threads ytd-continuation-item-renderer",
+      "#replies ytd-continuation-item-renderer"
+    ],
+    // 実機確認済み（2026-08-19）。新規コメント投稿欄。返信欄（is-reply属性つき）と
+    // 内部構造は同一なので、入力欄・投稿ボタンのセレクタは両方で共用する。
+    // ★ ページ読み込み直後はプレースホルダ(ytd-comment-simplebox-renderer)だけが存在し、
+    //   commentBoxTrigger をクリックして初めて本物のytd-commentboxがDOMに生成される
+    //   （返信欄と同じ「クリックして初めて生成される」パターン）。
+    commentBoxTrigger: [
+      "#simple-box #simplebox-placeholder",
+      "ytd-comment-simplebox-renderer #simplebox-placeholder"
+    ],
+    commentBox: ["ytd-commentbox:not([is-reply])"],
+    // 見た目はyt-formatted-stringだが実体はその内側のcontenteditableなdiv。
+    // yt-formatted-string自体はcontenteditable属性を持たない（実機確認で判明）。
+    commentBoxEditable: ["#contenteditable-textarea #contenteditable-root"],
+    commentBoxSubmit: ["#submit-button button"],
+    // ★ #cancel-button は同名のidが添付ファイル用ダイアログ内にも複数存在し衝突するため、
+    //   このIDは使わない（このボタンはこの拡張では使用しない想定）。
+    // コメント本文下の「返信」トリガー（「N件の返信」トグルとは別物）。
+    // like/dislikeボタンと構造が同一でidも無いため、aria-labelで区別する。
+    // ★ 日本語UI前提（このプロジェクトはD-01により個人利用限定）。
+    replyButton: [
+      "#toolbar button[aria-label='返信']",
+      "ytd-comment-engagement-bar button[aria-label='返信']"
+    ],
+    // 「返信」トリガーを押すと現れる返信用commentbox
+    replyCommentBox: ["ytd-commentbox[is-reply]"]
   },
 
   // ライブチャットは現在の対象外。将来再開する場合の診断候補として残す
@@ -324,7 +368,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 25
+export const DIAGNOSE_VERSION = 28
 
 export type DiagnoseReport = {
   v: number
