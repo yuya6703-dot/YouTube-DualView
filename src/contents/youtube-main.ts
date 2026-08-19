@@ -580,6 +580,11 @@ function watchRelated() {
 /** サブ画面の関連動画末尾から、YouTubeの次の推薦バッチを段階取得する。 */
 function loadMoreRelated() {
   if (relatedLoading || ports.size === 0 || !getVideoId()) return
+  // ★ 取り込み待機中（DOMがまだ前の動画のまま）は追加読み込みを始めない。
+  //   待機中は fetchRelated() が常に0件を返すため、「増えたかどうか」で
+  //   完了を判定するこの処理は永久に増加を検知できず、リトライのたびに
+  //   nudgeIntoViewport() を繰り返し続けてしまう（＝メイン画面のDOMを叩き続ける）。
+  if (awaitingFreshRelated) return
 
   relatedLoading = true
   const run = ++relatedLoadRun
@@ -1141,6 +1146,14 @@ function nudgeIntoViewport(el: HTMLElement, done: () => void, dwellMs = 700) {
   const snapshots: StyleSnapshot[] = [targetSnapshot]
   // content-visibility/hidden の祖先内ではfixed子要素も交差しないため、必要な祖先だけ一時解除する。
   for (let parent = el.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+    // ★安全装置その2: プレイヤーを含む祖先のスタイルは書き換えない。
+    //   上の安全装置は「対象要素がプレイヤーを含むか」しか見ていなかったが、
+    //   実際にはここで祖先を遡って display/contain/overflow を強制変更している。
+    //   関連動画欄やコメント欄の祖先には必ずプレイヤーを含む要素（#columns や
+    //   ytd-watch-flexy）があり、そこを触るとYouTube内部のサイズ計算が壊れて
+    //   映像が真っ暗なまま復帰しなくなる（2026-08-19 実機で発生）。
+    //   祖先を解除できなくても交差判定に失敗するだけで、呼び出し側のリトライに委ねられる。
+    if (player && parent.contains(player)) continue
     const computed = getComputedStyle(parent)
     const clipsDescendants = [computed.overflow, computed.overflowX, computed.overflowY]
       .some((value) => value === "hidden" || value === "clip")
