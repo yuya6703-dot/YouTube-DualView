@@ -21,7 +21,7 @@ jobs:
 
       # package.json の "packageManager" フィールドからバージョンを自動検出させる。
       # ここで version を指定すると「Multiple versions of pnpm specified」で失敗する。
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
       # pnpm@11.21.0（package.jsonのpackageManager指定）はNode.js v22.13未満だと
       # `import { styleText } from "node:util"` で SyntaxError を起こして即クラッシュする。
