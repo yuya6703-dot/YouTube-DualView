@@ -52,6 +52,10 @@ export interface TimestampNote {
 export type RichToken =
   | { t: "text"; v: string }
   | { t: "emoji"; url: string; alt: string }
+  // コメント中のリンク。hrefはCS側で実URLへ正規化済み（http/httpsのみ）。
+  // ★ 表示テキスト(v)は当てにできない。YouTubeは長いURLを「…」で省略して表示するため、
+  //   テキストから組み立て直すと壊れたURLになる。必ずhrefを使うこと。
+  | { t: "link"; href: string; v: string }
 
 export type FeedKind = "comment" | "chat"
 

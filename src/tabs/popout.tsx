@@ -692,22 +692,25 @@ export default function Popout() {
             </div>
 
             <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-lg border border-neutral-800">
-              <div className="flex items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2">
-                <p className="flex items-center gap-1.5 text-[11px] font-medium text-neutral-400">
+              {/* 幅が足りないときは入力欄が次の行へ折り返す（分割表示は片側が狭くなるため） */}
+              <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800 px-3 py-2">
+                <p className="flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-neutral-400">
                   <MessageSquare size={12} />
                   コメント
                   {feed.length > 0 && <span className="text-neutral-600">（{feed.length}件）</span>}
                 </p>
-                <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} />
+                <NewCommentComposer
+                  value={newCommentText}
+                  onChange={setNewCommentText}
+                  onSubmit={() => void postNewComment()}
+                  posting={newCommentPosting}
+                  disabled={tabId === null}
+                  error={newCommentError}
+                />
+                <div className="shrink-0">
+                  <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} />
+                </div>
               </div>
-              <NewCommentComposer
-                value={newCommentText}
-                onChange={setNewCommentText}
-                onSubmit={() => void postNewComment()}
-                posting={newCommentPosting}
-                disabled={tabId === null}
-                error={newCommentError}
-              />
               <ul onScroll={onFeedScroll} className="min-h-0 flex-1 overflow-y-auto">
                 {feed.map((item) => (
                   <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} />
@@ -725,13 +728,21 @@ export default function Popout() {
           </div>
         ) : commentsFullscreen ? (
           <div className="flex h-full flex-col">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <p className="flex items-center gap-1.5 text-xs font-medium text-neutral-300">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <p className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-neutral-300">
                 <MessageSquare size={13} />
                 コメント
                 {feed.length > 0 && <span className="text-neutral-500">（{feed.length}件）</span>}
               </p>
-              <div className="flex items-center gap-2">
+              <NewCommentComposer
+                value={newCommentText}
+                onChange={setNewCommentText}
+                onSubmit={() => void postNewComment()}
+                posting={newCommentPosting}
+                disabled={tabId === null}
+                error={newCommentError}
+              />
+              <div className="flex shrink-0 items-center gap-2">
                 <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} />
                 <button
                   onClick={() => setCommentsFullscreen(false)}
@@ -742,14 +753,6 @@ export default function Popout() {
               </div>
             </div>
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-neutral-800">
-              <NewCommentComposer
-                value={newCommentText}
-                onChange={setNewCommentText}
-                onSubmit={() => void postNewComment()}
-                posting={newCommentPosting}
-                disabled={tabId === null}
-                error={newCommentError}
-              />
               <ul onScroll={onFeedScroll} className="min-h-0 flex-1 overflow-y-auto">
                 {feed.map((item) => (
                   <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} />
@@ -1028,15 +1031,25 @@ export default function Popout() {
 
             {/* コメント —— Phase 1: DOMを自動監視して流れてくる。装飾UI(絵文字トークン等)はPhase 2 */}
             <section className="mt-6 rounded-lg border border-neutral-800">
-              <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2 px-4 py-3">
                 <button
                   onClick={() => setCommentsOpen((v) => !v)}
-                  className="flex flex-1 items-center gap-1.5 text-left text-xs font-medium text-neutral-300">
+                  className="flex shrink-0 items-center gap-1.5 text-left text-xs font-medium text-neutral-300">
                   <MessageSquare size={13} />
                   コメント
                   {feed.length > 0 && <span className="text-neutral-500">（{feed.length}件）</span>}
                 </button>
-                <div className="flex shrink-0 items-center gap-2">
+                {commentsOpen && (
+                  <NewCommentComposer
+                    value={newCommentText}
+                    onChange={setNewCommentText}
+                    onSubmit={() => void postNewComment()}
+                    posting={newCommentPosting}
+                    disabled={tabId === null}
+                    error={newCommentError}
+                  />
+                )}
+                <div className="ml-auto flex shrink-0 items-center gap-2">
                   {commentsOpen && feed.length > 0 && (
                     <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} />
                   )}
@@ -1056,17 +1069,6 @@ export default function Popout() {
                   </button>
                 </div>
               </div>
-
-              {commentsOpen && (
-                <NewCommentComposer
-                  value={newCommentText}
-                  onChange={setNewCommentText}
-                  onSubmit={() => void postNewComment()}
-                  posting={newCommentPosting}
-                  disabled={tabId === null}
-                  error={newCommentError}
-                />
-              )}
 
               {commentsOpen && (
                 <ul onScroll={onFeedScroll} className="max-h-72 overflow-y-auto border-t border-neutral-800">
@@ -1531,7 +1533,9 @@ function CommentRow({ item, size, tabId, isReply = false }: {
           <span className="truncate font-medium text-neutral-300">{item.author || "—"}</span>
           {item.publishedAt && <span className="shrink-0 text-neutral-600">{item.publishedAt}</span>}
         </p>
-        <p className={`mt-0.5 whitespace-pre-wrap break-words leading-snug text-neutral-300 ${cls.body}`}>{item.text}</p>
+        <p className={`mt-0.5 whitespace-pre-wrap break-words leading-snug text-neutral-300 ${cls.body}`}>
+          <CommentBody item={item} />
+        </p>
 
         <div className="mt-1 flex items-center gap-3">
           <button
@@ -1634,6 +1638,49 @@ function CommentRow({ item, size, tabId, isReply = false }: {
   )
 }
 
+/**
+ * コメント本文。リンクは青字で表示し、クリックでブラウザの別タブに開く。
+ *
+ * ★ 表示テキストからURLを組み立て直さない。YouTubeは長いURLを「…」で省略表示するため、
+ *   テキスト由来だと壊れたURLになる。CS側が`<a href>`から取った実URLだけを使う。
+ * ★ 素の target="_blank" は使わない。サブ画面は type:"popup" の特殊ウィンドウなので、
+ *   通常タブではなく別のポップアップとして開かれることがある。
+ */
+function CommentBody({ item }: { item: FeedItem }) {
+  if (item.tokens.length === 0) return <>{item.text}</>
+  return (
+    <>
+      {item.tokens.map((token, index) => {
+        if (token.t === "text") return <span key={index}>{token.v}</span>
+        if (token.t === "emoji") {
+          return (
+            <img
+              key={index}
+              src={token.url}
+              alt={token.alt}
+              className="inline-block h-4 w-4 align-text-bottom"
+            />
+          )
+        }
+        return (
+          <a
+            key={index}
+            href={token.href}
+            // 表示文字と飛び先が食い違うリンクは珍しくないので、実URLを必ず確認できるようにする
+            title={token.href}
+            onClick={(e) => {
+              e.preventDefault()
+              void chrome.tabs.create({ url: token.href })
+            }}
+            className="break-all text-sky-400 underline underline-offset-2 transition hover:text-sky-300">
+            {token.v}
+          </a>
+        )
+      })}
+    </>
+  )
+}
+
 function NewCommentComposer({ value, onChange, onSubmit, posting, disabled, error }: {
   value: string
   onChange: (value: string) => void
@@ -1642,38 +1689,47 @@ function NewCommentComposer({ value, onChange, onSubmit, posting, disabled, erro
   disabled: boolean
   error: string | null
 }) {
+  // 見出し行に横並びで置くため、通常は1行分の高さに収める。
+  // ★ textareaのままにしてShift+Enterの改行を残す（inputに変えると複数行コメントが打てなくなる）。
+  //   改行が入ったときだけ3行に広げる。
+  const active = value.trim().length > 0
   return (
-    <div className="border-t border-neutral-800 px-4 py-2.5">
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault()
-            onSubmit()
-          }
-        }}
-        placeholder="コメントを追加"
-        disabled={disabled}
-        rows={value ? 2 : 1}
-        className="w-full resize-none rounded bg-neutral-800 px-2.5 py-1.5 text-xs text-neutral-200 placeholder:text-neutral-600 focus:outline-none disabled:opacity-40"
-      />
-      {error && <p className="mt-1 text-[11px] leading-snug text-red-400">{error}</p>}
-      {value.trim() && (
-        <div className="mt-1.5 flex justify-end gap-2">
-          <button
-            onClick={() => onChange("")}
-            className="rounded px-2.5 py-1 text-[11px] text-neutral-400 transition hover:bg-neutral-800">
-            キャンセル
-          </button>
-          <button
-            onClick={onSubmit}
-            disabled={posting}
-            className="rounded bg-red-600 px-2.5 py-1 text-[11px] font-medium text-white transition hover:bg-red-500 disabled:opacity-40">
-            {posting ? "投稿中…" : "投稿"}
-          </button>
-        </div>
-      )}
+    <div className="min-w-[7rem] flex-1">
+      <div className="flex items-center gap-1">
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault()
+              onSubmit()
+            } else if (e.key === "Escape") {
+              onChange("")
+            }
+          }}
+          placeholder="コメントを追加"
+          disabled={disabled}
+          rows={value.includes("\n") ? 3 : 1}
+          className="min-w-0 flex-1 resize-none rounded bg-neutral-800 px-2 py-1 text-[11px] leading-5 text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:ring-1 focus:ring-neutral-600 disabled:opacity-40"
+        />
+        {active && (
+          <>
+            <button
+              onClick={() => onChange("")}
+              aria-label="キャンセル"
+              className="shrink-0 rounded p-1 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300">
+              <X size={12} />
+            </button>
+            <button
+              onClick={onSubmit}
+              disabled={posting}
+              className="shrink-0 rounded bg-red-600 px-2 py-1 text-[10px] font-medium text-white transition hover:bg-red-500 disabled:opacity-40">
+              {posting ? "投稿中…" : "投稿"}
+            </button>
+          </>
+        )}
+      </div>
+      {error && <p className="mt-1 text-[10px] leading-snug text-red-400">{error}</p>}
     </div>
   )
 }

@@ -260,6 +260,34 @@ export function parseClockDuration(s: string): number {
  * 要素の中身を RichToken[] に分解する。
  * ★ innerHTML を返さないこと。他人の投稿文字列を拡張機能側で解釈させない。
  */
+/**
+ * コメント中のリンクを、実際に開いてよい絶対URLへ正規化する。
+ *
+ * ★ YouTubeは外部リンクを `https://www.youtube.com/redirect?...&q=<実URL>` で包む。
+ *   そのまま開くと踏み台ページを経由するので、実URLを取り出す。
+ * ★ http/https 以外（javascript: や data: 等）は必ず捨てる。コメント本文は
+ *   第三者が書いた内容であり、そのままリンクにするとサブ画面が攻撃面になる。
+ */
+function resolveCommentLinkHref(raw: string | null): string | null {
+  if (!raw) return null
+  try {
+    const url = new URL(raw, location.href)
+    const host = url.hostname.toLowerCase()
+    const isYouTube =
+      host === "youtube.com" || host === "www.youtube.com" || host.endsWith(".youtube.com")
+    if (isYouTube && url.pathname === "/redirect") {
+      const q = url.searchParams.get("q")
+      if (q) {
+        const target = new URL(q, location.href)
+        if (target.protocol === "http:" || target.protocol === "https:") return target.href
+      }
+    }
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null
+  } catch {
+    return null
+  }
+}
+
 export function toTokens(el: Element | null): RichTokenLocal[] {
   if (!el) return []
   const tokens: RichTokenLocal[] = []
@@ -270,8 +298,15 @@ export function toTokens(el: Element | null): RichTokenLocal[] {
     } else if (node instanceof HTMLImageElement) {
       // カスタム絵文字/メンバー絵文字は img で表現される
       tokens.push({ t: "emoji", url: node.src, alt: node.alt || "emoji" })
+    } else if (node instanceof HTMLAnchorElement) {
+      // ★ <a> は平坦化せずリンクとして残す。中身を展開してしまうと href が失われ、
+      //   省略表示されたテキストしか手元に残らない（＝正しいURLを復元できない）。
+      const href = resolveCommentLinkHref(node.getAttribute("href"))
+      const v = node.textContent ?? ""
+      if (href && v) tokens.push({ t: "link", href, v })
+      else tokens.push(...toTokens(node))
     } else if (node instanceof Element) {
-      tokens.push(...toTokens(node)) // <a> や <span> のネストを平坦化
+      tokens.push(...toTokens(node)) // <span> のネストを平坦化
     }
   })
   return tokens
@@ -281,6 +316,7 @@ export function toTokens(el: Element | null): RichTokenLocal[] {
 type RichTokenLocal =
   | { t: "text"; v: string }
   | { t: "emoji"; url: string; alt: string }
+  | { t: "link"; href: string; v: string }
 
 /* ============================================================
  * 生存確認（セレクタが壊れたときの一次切り分け）
@@ -377,7 +413,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 35
+export const DIAGNOSE_VERSION = 36
 
 export type DiagnoseReport = {
   v: number
