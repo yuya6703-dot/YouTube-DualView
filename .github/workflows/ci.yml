@@ -19,9 +19,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # package.json の "packageManager" フィールドからバージョンを自動検出させる。
+      # ここで version を指定すると「Multiple versions of pnpm specified」で失敗する。
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
 
       - uses: actions/setup-node@v4
         with:
