@@ -17,16 +17,20 @@ jobs:
     name: typecheck / build / audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
+      # package.json の "packageManager" フィールドからバージョンを自動検出させる。
+      # ここで version を指定すると「Multiple versions of pnpm specified」で失敗する。
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      # pnpm@11.21.0（package.jsonのpackageManager指定）はNode.js v22.13未満だと
+      # `import { styleText } from "node:util"` で SyntaxError を起こして即クラッシュする。
+      # ローカルはNode v24系なので気づかなかったが、CIでは明示的に満たす必要がある。
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20.9"
-          cache: pnpm
+          node-version: "22.13"
+      # ★キャッシュ（setup-nodeの cache:pnpm / actions/cache 手動構成のどちらも）は
+      #   いったん無しにしてある。速度が問題になったら改めて追加する。
 
       # pnpm-workspace.yaml の onlyBuiltDependencies が事前承認リストになっているため、
       # ネイティブ依存（@parcel/watcher / @swc/core / esbuild / lmdb / sharp 等）のビルドも
@@ -41,7 +45,7 @@ jobs:
       # ビルド成果物を確認用にアーティファクトとして残す（Chrome/Braveへの手動読み込み確認に使える）
       - name: Upload unpacked extension
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chrome-mv3-prod
           path: build/chrome-mv3-prod
