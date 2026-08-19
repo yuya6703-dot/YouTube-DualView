@@ -1,0 +1,5 @@
+# GitHub Pages（プライバシーポリシー公開用）の設定。
+# ★ このファイルが無いとMarkdownがそのままの文字列として表示される。
+theme: jekyll-theme-minimal
+title: DualView for YouTube
+description: Privacy Policy

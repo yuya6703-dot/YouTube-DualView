@@ -16,6 +16,7 @@
   "scripts": {
     "dev": "plasmo dev --target=chrome-mv3",
     "build": "plasmo build --target=chrome-mv3",
+    "package": "plasmo package --target=chrome-mv3",
     "typecheck": "tsc --noEmit",
     "verify": "pnpm typecheck && pnpm peers check && pnpm build && pnpm audit --prod --audit-level=high"
   },
