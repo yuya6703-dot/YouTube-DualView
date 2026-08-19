@@ -204,6 +204,10 @@ function onNavigated() {
   relatedPageState = initialPageState("related")
   commentPageState = initialPageState("comment")
   resetVideoCaches()
+  // 実在する動画から別の動画へ移ったときだけ、前の動画のDOMが残り得る。
+  // 初回ロードには混入し得る「前の動画」がないので待たない。
+  awaitingFreshRelated = previousVideoId !== null
+  awaitingRelatedSince = Date.now()
   bindVideo()
   emit({ type: "VIDEO_CHANGED", payload: { videoId: id, kind: getKind() } })
   // ライブチャットstreamは未実装のため、親ページ側feedは常にcommentとして扱う。
@@ -225,6 +229,7 @@ function onNavigated() {
 
 document.addEventListener("yt-navigate-finish", onNavigated)
 document.addEventListener("yt-navigate-start", capturePreNavigationComments)
+document.addEventListener("yt-navigate-start", capturePreNavigationRelated)
 // yt-navigate-finish が来ないケース（初回・戻る）の保険。1秒間隔なのでスロットル影響は無視できる
 setInterval(() => {
   if (ports.size === 0) return
@@ -440,8 +445,27 @@ function fetchRelated(): QueueItem[] {
     ? relatedContainerEl
     : q(SELECTORS.related.container)
   if (!container) return Array.from(relatedItemCache.values())
+
+  const parsed: QueueItem[] = []
   for (const item of findRelatedItems(container).map(parseRelatedItem)) {
-    if (!item) continue
+    if (item) parsed.push(item)
+  }
+
+  // ★ 動画切り替え直後、DOMがまだ前の動画のままの間は1件も取り込まない。
+  //   遷移開始時に無かったIDが1つでも現れたら「差し替わった」と判断する。
+  //   一度も入れ替わらないDOM世代で永久に止まらないよう、時間切れでは受け入れる
+  //   （コメント側の FRESH_COMMENTS_TIMEOUT_MS と同じ考え方）。
+  if (awaitingFreshRelated) {
+    const snapshot = navigationStartRelatedIds
+    const hasFreshItem = snapshot === null || parsed.some((item) => !snapshot.has(item.videoId))
+    if (!hasFreshItem && Date.now() - awaitingRelatedSince <= FRESH_RELATED_TIMEOUT_MS) {
+      return Array.from(relatedItemCache.values())
+    }
+    awaitingFreshRelated = false
+    navigationStartRelatedIds = null
+  }
+
+  for (const item of parsed) {
     const existing = relatedItemCache.get(item.videoId)
     relatedItemCache.set(item.videoId, existing ? {
       ...existing,
@@ -474,6 +498,40 @@ let relatedDebounceId: number | null = null
 let relatedContainerEl: Element | null = null
 let relatedLoadRun = 0
 let relatedLoading = false
+
+/**
+ * 動画切り替え直後、YouTubeが前の動画の関連動画DOMをまだ差し替えていない期間がある。
+ * そのまま取り込むと、前の動画の推薦が新しい動画の関連動画としてキャッシュに入る。
+ * さらに relatedItemCache は古い項目を消さないため、その後に本物が届いても
+ * 「前の動画の分＋新しい分」が積み上がり、一覧の先頭が前の動画のままになる
+ * （2026-08-19 実機で「関連動画(36件)なのにメイン画面のサイドバーとは別物」として報告）。
+ *
+ * コメント側の awaitingFreshComments と同じ考え方で、SPA遷移開始時点の動画IDを
+ * 記録しておき、そこに無いIDが現れる＝DOMが入れ替わったと確認できるまで取り込まない。
+ */
+let navigationStartRelatedIds: Set<string> | null = null
+let awaitingFreshRelated = false
+let awaitingRelatedSince = 0
+const FRESH_RELATED_TIMEOUT_MS = 4000
+
+/** SPA遷移開始時点の関連動画IDを「前動画の分」として記録する。 */
+function capturePreNavigationRelated() {
+  if (ports.size === 0) {
+    navigationStartRelatedIds = null
+    return
+  }
+  const container = relatedContainerEl && document.contains(relatedContainerEl)
+    ? relatedContainerEl
+    : q(SELECTORS.related.container)
+  const ids = new Set<string>()
+  if (container) {
+    for (const el of findRelatedItems(container)) {
+      const item = parseRelatedItem(el)
+      if (item) ids.add(item.videoId)
+    }
+  }
+  navigationStartRelatedIds = ids
+}
 
 function findRelatedContinuation(container: Element | null = relatedContainerEl): HTMLElement | null {
   if (!container || !document.contains(container)) return null
@@ -1374,6 +1432,9 @@ function stopWatchPageObservers() {
   navigationStartCommentSnapshot = null
   awaitingFreshComments = false
   awaitingSince = 0
+  navigationStartRelatedIds = null
+  awaitingFreshRelated = false
+  awaitingRelatedSince = 0
   commentsRetryToken++
   commentLoadRun++
   commentLoading = false
@@ -1525,6 +1586,10 @@ chrome.runtime.onConnect.addListener((port) => {
     if (currentVideoId !== lastVideoId) resetVideoCaches()
     lastVideoId = currentVideoId
     navigationStartCommentSnapshot = null
+    // Port不在中は監視を止めているため、現在ページを「初回」として扱う。
+    // 待たずにその場のDOMを取り込んでよい（混入し得る前動画のDOMは既に消えている）。
+    navigationStartRelatedIds = null
+    awaitingFreshRelated = false
     relatedPageState = initialPageState("related")
     commentPageState = initialPageState("comment")
     if (location.pathname === "/watch" && lastVideoId) {
