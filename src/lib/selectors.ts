@@ -184,7 +184,15 @@ export const SELECTORS = {
     // コメント本文下の「返信」トリガー（「N件の返信」トグルとは別物）。
     // like/dislikeボタンと構造が同一でidも無いため、aria-labelで区別する。
     // ★ 日本語UI前提（このプロジェクトはD-01により個人利用限定）。
+    // ★ 2026-08-19 実機のDOM属性を確認して言語非依存のセレクタに変更した。
+    //   ツールバー内の4種のボタンは属性の持ち方で機械的に見分けられる:
+    //   いいね/よくない → aria-pressedを持つ。ハート(#creator-heart-button内) → 固有の親idを持つ。
+    //   「返信」だけが aria-pressed を持たず、ハートの子でもないボタン。
+    //   （title属性の値=表示言語での文言 自体は見ないので、YouTubeの表示言語に依存しない）
+    //   旧: aria-label='返信' の文字列一致は日本語UI前提だったため、フォールバックとして残す。
     replyButton: [
+      "#toolbar button[title]:not([aria-pressed]):not(#creator-heart-button button)",
+      "ytd-comment-engagement-bar button[title]:not([aria-pressed]):not(#creator-heart-button button)",
       "#toolbar button[aria-label='返信']",
       "ytd-comment-engagement-bar button[aria-label='返信']"
     ],
@@ -454,7 +462,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 37
+export const DIAGNOSE_VERSION = 38
 
 export type DiagnoseReport = {
   v: number
