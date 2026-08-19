@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #__plasmo { height: 100%; margin: 0; }
+/* bg-neutral-900 と同色。Reactマウント前のチラつき防止用フォールバックなので必ず一致させる */
+body { background: #171717; }
+input[type="range"] { -webkit-appearance: none; height: 4px; border-radius: 999px; background: #404040; }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px;
+  border-radius: 50%; background: currentColor; cursor: pointer;
+}
+
+/* スクロールバーを背景になじむダークグレーにする（既定の白いバーが浮いて見えるため） */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent; /* neutral-700 の親指 / 透明トラック */
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-color: #3f3f46; /* neutral-700 */
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: #52525b; } /* neutral-600 */
+::-webkit-scrollbar-corner { background: transparent; }

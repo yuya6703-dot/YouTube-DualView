@@ -1,0 +1,23 @@
+allowBuilds:
+  '@parcel/watcher': true
+  '@swc/core': true
+  esbuild: true
+  lmdb: true
+  msgpackr-extract: true
+  sharp: true
+overrides:
+  # Parcel 2.9は svgo 2系を使うため、svgo 3を要求するhtmlnano 2.1系への浮動を防ぐ。
+  htmlnano: 2.0.0
+  # Plasmoの古いビルド依存に対する同一API系のセキュリティ修正版。
+  msgpackr: 1.12.1
+  content-security-policy-parser: 0.6.0
+  sharp: 0.35.3
+# pnpm v10+ ではビルドスクリプト許可リストがここに移動した（package.json の pnpm フィールドは無視される）
+# Plasmo はネイティブ依存（parcel watcher / swc / lmdb / sharp）のビルドが通らないと dev が起動しない
+onlyBuiltDependencies:
+  - "@parcel/watcher"
+  - "@swc/core"
+  - esbuild
+  - lmdb
+  - msgpackr-extract
+  - sharp

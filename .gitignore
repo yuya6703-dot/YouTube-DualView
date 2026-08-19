@@ -1,0 +1,8 @@
+node_modules
+.plasmo
+build
+out
+keys
+.env*
+!.env.example
+*.tsbuildinfo

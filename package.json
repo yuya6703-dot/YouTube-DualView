@@ -1,0 +1,66 @@
+{
+  "name": "youtube-dualview",
+  "displayName": "YouTube DualView",
+  "version": "0.1.0",
+  "description": "サブモニタからYouTubeを操作する個人用ツール",
+  "author": "miguel",
+  "private": true,
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=20.9.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "dev": "plasmo dev --target=chrome-mv3",
+    "build": "plasmo build --target=chrome-mv3",
+    "typecheck": "tsc --noEmit",
+    "verify": "pnpm typecheck && pnpm peers check && pnpm build && pnpm audit --prod --audit-level=high"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.1.0",
+    "@dnd-kit/modifiers": "^7.0.0",
+    "@dnd-kit/sortable": "^8.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.454.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "tailwind-merge": "^2.5.4",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.279",
+    "@types/node": "^26.2.0",
+    "@types/react": "18.2.48",
+    "@types/react-dom": "18.2.18",
+    "autoprefixer": "^10.4.20",
+    "plasmo": "^0.90.5",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "typescript": "5.3.3"
+  },
+  "manifest": {
+    "name": "YouTube DualView (Personal)",
+    "description": "サブモニタからYouTubeを操作する個人用ツール",
+    "permissions": [
+      "storage",
+      "tabs"
+    ],
+    "host_permissions": [
+      "https://www.youtube.com/*"
+    ],
+    "action": {
+      "default_title": "サブ画面を開く / 前面へ (Alt+Y)"
+    },
+    "commands": {
+      "open-popout": {
+        "suggested_key": {
+          "default": "Alt+Y"
+        },
+        "description": "サブ画面を開く / 前面に出す"
+      }
+    },
+    "minimum_chrome_version": "116"
+  }
+}
