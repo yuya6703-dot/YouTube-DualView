@@ -10,6 +10,9 @@
     "node": ">=22.13.0",
     "pnpm": ">=11.0.0"
   },
+  "browserslist": [
+    "chrome >= 116"
+  ],
   "scripts": {
     "dev": "plasmo dev --target=chrome-mv3",
     "build": "plasmo build --target=chrome-mv3",
