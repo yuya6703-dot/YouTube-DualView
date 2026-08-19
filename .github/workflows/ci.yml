@@ -26,18 +26,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20.9"
-
-      # setup-node組み込みの cache: pnpm は、新しいpnpm(v11)との組み合わせで
-      # 内部の store-path 検出が失敗することがあるため、自前でキャッシュする。
-      - name: Get pnpm store directory
-        id: pnpm-cache
-        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-cache.outputs.path }}
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: ${{ runner.os }}-pnpm-
+      # ★キャッシュ（setup-nodeの cache:pnpm / actions/cache 手動構成のどちらも）を
+      #   このCI上で試したところ原因不明のまま失敗が続いたため、いったん無しで確実に
+      #   グリーンにすることを優先した。速度が問題になったら改めて調査する。
 
       # pnpm-workspace.yaml の onlyBuiltDependencies が事前承認リストになっているため、
       # ネイティブ依存（@parcel/watcher / @swc/core / esbuild / lmdb / sharp 等）のビルドも
