@@ -1478,6 +1478,7 @@ function CommentRow({ item, size, tabId, isReply = false }: {
   const [replyText, setReplyText] = useState("")
   const [replyPosting, setReplyPosting] = useState(false)
   const [replyError, setReplyError] = useState<string | null>(null)
+  const [replyNotice, setReplyNotice] = useState<string | null>(null)
 
   const postReply = async () => {
     if (tabId === null || replyPosting) return
@@ -1495,10 +1496,18 @@ function CommentRow({ item, size, tabId, isReply = false }: {
       setReplyError("返信できませんでした。メイン画面でログインしているか確認してください。")
       return
     }
-    setReplies(res.data.items)
-    setRepliesOpen(true)
     setReplyText("")
     setReplying(false)
+    // ★ 投稿の成否と、一覧を読み戻せたかは別の話。空配列で上書きすると
+    //   「返信を取得できませんでした」が出て投稿自体が失敗したように見えるため、
+    //   読み戻せなかったときは一覧に触れず、投稿できた旨だけを伝える。
+    if (res.data.items.length > 0) {
+      setReplies(res.data.items)
+      setRepliesOpen(true)
+      setReplyNotice(null)
+    } else {
+      setReplyNotice("返信を投稿しました（一覧の再取得はできませんでした）")
+    }
   }
 
   return (
@@ -1549,7 +1558,11 @@ function CommentRow({ item, size, tabId, isReply = false }: {
 
           {!isReply && (
             <button
-              onClick={() => setReplying((v) => !v)}
+              onClick={() => {
+                setReplyNotice(null)
+                setReplyError(null)
+                setReplying((v) => !v)
+              }}
               disabled={tabId === null}
               className="rounded px-1 py-0.5 text-[11px] text-neutral-500 transition hover:text-neutral-300 disabled:opacity-40">
               返信する
@@ -1605,6 +1618,9 @@ function CommentRow({ item, size, tabId, isReply = false }: {
         )}
         {repliesOpen && replies && replies.length === 0 && (
           <p className="mt-1 pl-2 text-[11px] text-neutral-600">返信を取得できませんでした</p>
+        )}
+        {replyNotice && (
+          <p className="mt-1 pl-2 text-[11px] text-neutral-500">{replyNotice}</p>
         )}
       </div>
     </li>

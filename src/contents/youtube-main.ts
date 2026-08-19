@@ -818,6 +818,50 @@ async function submitCommentBox(box: Element, text_: string): Promise<boolean> {
   return true
 }
 
+/**
+ * 指定コメントの返信一覧を読み出す。必要なら返信スレッドを展開してから読む。
+ *
+ * ★「返信を見る」トグルからの取得と、返信を投稿した直後の読み直しの両方がここを通る。
+ *   以前は投稿直後だけ「少し待って1回読むだけ」の素朴な実装になっており、
+ *   スレッドが畳まれたままだと必ず0件になって「返信を取得できませんでした」と
+ *   表示されていた（投稿自体は成功しているのに失敗したように見える）。
+ */
+async function loadRepliesFor(commentId: string): Promise<FeedItem[]> {
+  const el = findCommentElementById(commentId)
+  if (!el) return []
+
+  // ★ 既に展開済みのスレッドでトグルを押すと畳んでしまうため、
+  //   返信がDOMに出ていない場合だけクリックする。
+  const alreadyLoaded = qa(SELECTORS.comments.replyItem, el).length > 0
+  if (!alreadyLoaded) {
+    const toggle = q<HTMLElement>(SELECTORS.comments.replyToggle, el)
+    if (toggle && !toggle.matches(":disabled, [disabled], [aria-disabled='true']")) {
+      toggle.click()
+    }
+    // 展開ボタンを押しても、返信本体はcontinuation-item-renderer側の
+    // IntersectionObserverで別途遅延読み込みされる（related動画/コメント本体と同じ罠）。
+    // メイン画面を実際にスクロールしない前提のこの拡張では自然には交差しないため、
+    // 短い間隔で様子を見ながらnudgeIntoViewportで刺激する（他機能に合わせて700ms間隔）。
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const target = findCommentElementById(commentId)
+      const continuation = target && q<HTMLElement>(SELECTORS.comments.repliesContinuation, target)
+      if (continuation) nudgeIntoViewport(continuation, () => {}, 700)
+      await new Promise((resolve) => window.setTimeout(resolve, 700))
+      const refreshed = findCommentElementById(commentId)
+      if (refreshed && qa(SELECTORS.comments.replyItem, refreshed).length > 0) break
+    }
+  }
+
+  const parent = findCommentElementById(commentId)
+  if (!parent) return []
+  const items: FeedItem[] = []
+  for (const replyEl of qa(SELECTORS.comments.replyItem, parent)) {
+    const item = parseCommentThread(replyEl)
+    if (item) items.push({ ...item, parentId: commentId })
+  }
+  return items
+}
+
 function parseCommentThread(el: Element): FeedItem | null {
   const publishedAt = text(SELECTORS.comments.published, el)
   const id = getStableCommentId(el)
@@ -1660,39 +1704,7 @@ registerHandlers({
       ...(likeCount !== undefined ? { likeCount } : {})
     }
   },
-  COMMENT_LOAD_REPLIES: async ({ commentId }) => {
-    const el = findCommentElementById(commentId)
-    if (!el) return { items: [] }
-
-    const alreadyLoaded = qa(SELECTORS.comments.replyItem, el).length > 0
-    if (!alreadyLoaded) {
-      const toggle = q<HTMLElement>(SELECTORS.comments.replyToggle, el)
-      if (toggle && !toggle.matches(":disabled, [disabled], [aria-disabled='true']")) {
-        toggle.click()
-      }
-      // 展開ボタンを押しても、返信本体はcontinuation-item-renderer側の
-      // IntersectionObserverで別途遅延読み込みされる（related動画/コメント本体と同じ罠）。
-      // メイン画面を実際にスクロールしない前提のこの拡張では自然には交差しないため、
-      // 短い間隔で様子を見ながらnudgeIntoViewportで刺激する（他機能に合わせて700ms間隔）。
-      for (let attempt = 0; attempt < 6; attempt++) {
-        const target = findCommentElementById(commentId)
-        const continuation = target && q<HTMLElement>(SELECTORS.comments.repliesContinuation, target)
-        if (continuation) nudgeIntoViewport(continuation, () => {}, 700)
-        await new Promise((resolve) => window.setTimeout(resolve, 700))
-        const refreshed = findCommentElementById(commentId)
-        if (refreshed && qa(SELECTORS.comments.replyItem, refreshed).length > 0) break
-      }
-    }
-
-    const parent = findCommentElementById(commentId)
-    if (!parent) return { items: [] }
-    const items: FeedItem[] = []
-    for (const replyEl of qa(SELECTORS.comments.replyItem, parent)) {
-      const item = parseCommentThread(replyEl)
-      if (item) items.push({ ...item, parentId: commentId })
-    }
-    return { items }
-  },
+  COMMENT_LOAD_REPLIES: async ({ commentId }) => ({ items: await loadRepliesFor(commentId) }),
   COMMENT_POST: async ({ text: body }) => {
     let box = q<HTMLElement>(SELECTORS.comments.commentBox)
     if (!box) {
@@ -1735,16 +1747,12 @@ registerHandlers({
     const ok = await submitCommentBox(box, body)
     if (!ok) return { ok: false, items: [] }
 
-    // 投稿の反映（DOMへの追加）を少し待ってから、最新の返信一覧を読み直して返す
+    // 投稿がDOMへ反映されるのを一呼吸待ってから、最新の返信一覧を読み直して返す。
+    // ★ 読み直しは「返信を見る」と同じ loadRepliesFor() を通す。返信スレッドは
+    //   投稿しただけでは展開されないままのことがあり、単純に読むと必ず0件になって
+    //   投稿は成功しているのに「返信を取得できませんでした」と表示されてしまう。
     await new Promise((resolve) => window.setTimeout(resolve, 500))
-    const parent = findCommentElementById(commentId)
-    if (!parent) return { ok: true, items: [] }
-    const items: FeedItem[] = []
-    for (const replyEl of qa(SELECTORS.comments.replyItem, parent)) {
-      const item = parseCommentThread(replyEl)
-      if (item) items.push({ ...item, parentId: commentId })
-    }
-    return { ok: true, items }
+    return { ok: true, items: await loadRepliesFor(commentId) }
   },
   DIAGNOSE_SELECTORS: () => ({ v: DIAGNOSE_VERSION, checks: diagnoseDetail(), samples: sampleOutlines() })
 })
