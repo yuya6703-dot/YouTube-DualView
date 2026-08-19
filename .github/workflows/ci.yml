@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 同じブランチへの連続pushでは古い方のジョブを打ち切る（Actions分の節約）
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck / build / audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.9"
+          cache: pnpm
+
+      # pnpm-workspace.yaml の onlyBuiltDependencies が事前承認リストになっているため、
+      # ネイティブ依存（@parcel/watcher / @swc/core / esbuild / lmdb / sharp 等）のビルドも
+      # 対話プロンプト無しで通る（ローカルの pnpm approve-builds --all と同じ内容）。
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 型検査・prodビルド・依存監査をまとめて行う（README/PROJECT.mdの pnpm verify と同一）
+      - name: Verify
+        run: pnpm verify
+
+      # ビルド成果物を確認用にアーティファクトとして残す（Chrome/Braveへの手動読み込み確認に使える）
+      - name: Upload unpacked extension
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-mv3-prod
+          path: build/chrome-mv3-prod
+          if-no-files-found: ignore
+          retention-days: 14

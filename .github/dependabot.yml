@@ -1,0 +1,32 @@
+version: 2
+updates:
+  # npm依存関係（pnpm-lock.yamlを読んで更新PRを作る）
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    groups:
+      # Plasmo本体とビルド周りの依存はまとめて1本のPRにする
+      # （個別に上がると壊れやすい組み合わせ — D-01の"Plasmo単独"方針と関係が深いため）
+      plasmo:
+        patterns:
+          - "plasmo"
+          - "@parcel/*"
+          - "@swc/*"
+      dnd-kit:
+        patterns:
+          - "@dnd-kit/*"
+    labels:
+      - "dependencies"
+
+  # GitHub Actions のワークフロー自体（actions/checkout等）も更新対象にする
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "ci"
