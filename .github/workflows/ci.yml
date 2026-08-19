@@ -23,34 +23,20 @@ jobs:
       # ここで version を指定すると「Multiple versions of pnpm specified」で失敗する。
       - uses: pnpm/action-setup@v4
 
+      # pnpm@11.21.0（package.jsonのpackageManager指定）はNode.js v22.13未満だと
+      # `import { styleText } from "node:util"` で SyntaxError を起こして即クラッシュする。
+      # ローカルはNode v24系なので気づかなかったが、CIでは明示的に満たす必要がある。
       - uses: actions/setup-node@v4
         with:
-          node-version: "20.9"
-      # ★キャッシュ（setup-nodeの cache:pnpm / actions/cache 手動構成のどちらも）を
-      #   このCI上で試したところ原因不明のまま失敗が続いたため、いったん無しで確実に
-      #   グリーンにすることを優先した。速度が問題になったら改めて調査する。
+          node-version: "22.13"
+      # ★キャッシュ（setup-nodeの cache:pnpm / actions/cache 手動構成のどちらも）は
+      #   いったん無しにしてある。速度が問題になったら改めて追加する。
 
       # pnpm-workspace.yaml の onlyBuiltDependencies が事前承認リストになっているため、
       # ネイティブ依存（@parcel/watcher / @swc/core / esbuild / lmdb / sharp 等）のビルドも
       # 対話プロンプト無しで通る（ローカルの pnpm approve-builds --all と同じ内容）。
-      # ★診断用: GITHUB_STEP_SUMMARYはWeb UIでログインしないと見えず、
-      #   check-runsのoutput.summaryにもAPI経由では反映されないと判明したため、
-      #   代わりに ::error:: コマンドでアノテーションとして残す
-      #   （/repos/{owner}/{repo}/check-runs/{id}/annotations は未認証でも取得できる）。
-      #   原因特定でき次第この工夫は外す。
       - name: Install dependencies
-        run: |
-          set +e
-          pnpm install --frozen-lockfile > /tmp/install.log 2>&1
-          code=$?
-          cat /tmp/install.log
-          if [ $code -ne 0 ]; then
-            tail -n 25 /tmp/install.log | while IFS= read -r line; do
-              esc=$(printf '%s' "$line" | sed 's/%/%25/g; s/\r/%0D/g')
-              echo "::error::${esc}"
-            done
-          fi
-          exit $code
+        run: pnpm install --frozen-lockfile
 
       # 型検査・prodビルド・依存監査をまとめて行う（README/PROJECT.mdの pnpm verify と同一）
       - name: Verify
