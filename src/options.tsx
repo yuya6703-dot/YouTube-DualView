@@ -6,6 +6,7 @@
  * （src/popup.tsx を置くと default_popup が自動登録されるのと同じ仕組み。D-03参照）。
  */
 import { useEffect, useState } from "react"
+import { getDictionary } from "~lib/i18n"
 import {
   DEFAULT_RELATED_DISPLAY_SIZE,
   DEFAULT_SETTINGS,
@@ -104,6 +105,9 @@ export default function Options() {
       .then(flashSaved)
   }
 
+  const t = getDictionary(settings.language)
+  const sizeLabels: Record<"sm" | "md" | "lg", string> = { sm: t.small, md: t.medium, lg: t.large }
+
   if (!loaded) return null // ちらつき防止。読み込みは一瞬なのでスピナーは出さない
 
   return (
@@ -111,19 +115,41 @@ export default function Options() {
       <div className="mx-auto max-w-xl px-6 py-10">
         <header className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">DualView for YouTube 設定</h1>
-            <p className="mt-1 text-xs text-neutral-500">変更は自動的に保存されます</p>
+            <h1 className="text-lg font-semibold tracking-tight">DualView for YouTube {t.optionsTitle}</h1>
+            <p className="mt-1 text-xs text-neutral-500">{t.optionsAutoSaved}</p>
           </div>
           {saved && (
             <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-medium text-emerald-400">
-              保存しました
+              {t.optionsSavedBadge}
             </span>
           )}
         </header>
 
+        {/* 言語 */}
+        <Section title={t.sectionLanguage}>
+          <Field label={t.languageLabel} hint={t.languageHint}>
+            <div className="flex w-fit items-center overflow-hidden rounded border border-neutral-700">
+              {(["ja", "en"] as const).map((lang) => (
+                <button
+                  key={lang}
+                  type="button"
+                  onClick={() => update({ language: lang })}
+                  aria-pressed={settings.language === lang}
+                  className={`px-3 py-1.5 text-xs transition ${
+                    settings.language === lang
+                      ? "bg-neutral-700 text-neutral-100"
+                      : "text-neutral-500 hover:bg-neutral-800"
+                  }`}>
+                  {lang === "ja" ? t.languageJa : t.languageEn}
+                </button>
+              ))}
+            </div>
+          </Field>
+        </Section>
+
         {/* 再生 */}
-        <Section title="再生">
-          <Field label="初期音量" hint="サブ画面を新規に開いたときの初期値（今後の機能で使用）">
+        <Section title={t.sectionPlayback}>
+          <Field label={t.defaultVolumeLabel} hint={t.defaultVolumeHint}>
             <div className="flex items-center gap-3">
               <input
                 type="range" min={0} max={100}
@@ -137,7 +163,7 @@ export default function Options() {
             </div>
           </Field>
 
-          <Field label="速度の刻み幅" hint="サブ画面の速度＋／－ボタンを押したときの増減量">
+          <Field label={t.speedStepLabel} hint={t.speedStepHint}>
             <div className="flex gap-2">
               {SPEED_STEP_OPTIONS.map((step) => (
                 <button
@@ -156,34 +182,28 @@ export default function Options() {
         </Section>
 
         {/* サブ画面の開閉 */}
-        <Section title="サブ画面の開閉">
-          <Field
-            label="YouTubeを開いたら自動でサブ画面を開く"
-            hint="動画ページを開いたときに自動で起動します。既に開いている場合は前面化しません（視聴の邪魔をしないため）">
+        <Section title={t.sectionPopoutOpenClose}>
+          <Field label={t.autoOpenLabel} hint={t.autoOpenHint}>
             <Toggle checked={settings.autoOpenPopout} onChange={(v) => update({ autoOpenPopout: v })} />
           </Field>
 
-          <Field
-            label="YouTubeタブを閉じたらサブ画面も閉じる"
-            hint="他にYouTubeタブが残っている場合は閉じません">
+          <Field label={t.autoCloseLabel} hint={t.autoCloseHint}>
             <Toggle checked={settings.autoClosePopout} onChange={(v) => update({ autoClosePopout: v })} />
           </Field>
         </Section>
 
         {/* 自動再生 */}
-        <Section title="自動再生">
-          <Field label="キューの自動連続再生" hint="動画が終わったら「次に再生」キューの先頭を自動的に再生します">
+        <Section title={t.sectionAutoplay}>
+          <Field label={t.autoPlayNextLabel} hint={t.autoPlayNextHint}>
             <Toggle checked={settings.autoPlayNext} onChange={(v) => update({ autoPlayNext: v })} />
           </Field>
         </Section>
 
-        <Section title="関連動画">
-          <Field
-            label="表示サイズ"
-            hint="サムネイル、タイトル、チャンネル名、行間をまとめて変更します">
+        <Section title={t.related}>
+          <Field label={t.displaySizeLabel} hint={t.displaySizeHint}>
             <div
               role="group"
-              aria-label="関連動画の表示サイズ"
+              aria-label={t.relatedSizeGroupLabel}
               className="flex w-fit items-center overflow-hidden rounded border border-neutral-700">
               {(["sm", "md", "lg"] as const).map((size) => (
                 <button
@@ -196,7 +216,7 @@ export default function Options() {
                       ? "bg-neutral-700 text-neutral-100"
                       : "text-neutral-500 hover:bg-neutral-800"
                   }`}>
-                  {{ sm: "小", md: "中", lg: "大" }[size]}
+                  {sizeLabels[size]}
                 </button>
               ))}
             </div>
@@ -204,10 +224,8 @@ export default function Options() {
         </Section>
 
         {/* コメント / 将来のストリーミングフィード */}
-        <Section title="コメント">
-          <Field
-            label="ストリーミング最大保持件数"
-            hint="通常コメントは最後まで閲覧できるよう全件保持します。この上限は将来のライブチャットなど流れ続ける表示にだけ適用します">
+        <Section title={t.comments}>
+          <Field label={t.feedMaxRowsLabel} hint={t.feedMaxRowsHint}>
             <input
               type="number" min={20} max={2000} step={10}
               value={settings.feedMaxRows}
@@ -216,7 +234,7 @@ export default function Options() {
             />
           </Field>
 
-          <Field label="文字サイズ" hint="サブ画面のコメント欄と同じ設定です">
+          <Field label={t.fontSizeSectionLabel} hint={t.fontSizeHint}>
             <div className="flex items-center overflow-hidden rounded border border-neutral-700 w-fit">
               {(["sm", "md", "lg"] as const).map((size) => (
                 <button
@@ -227,7 +245,7 @@ export default function Options() {
                       ? "bg-neutral-700 text-neutral-100"
                       : "text-neutral-500 hover:bg-neutral-800"
                   }`}>
-                  {{ sm: "小", md: "中", lg: "大" }[size]}
+                  {sizeLabels[size]}
                 </button>
               ))}
             </div>
@@ -237,7 +255,7 @@ export default function Options() {
         <button
           onClick={resetToDefaults}
           className="mt-4 text-xs text-neutral-500 underline decoration-neutral-700 underline-offset-2 hover:text-neutral-300">
-          既定値に戻す
+          {t.resetToDefaults}
         </button>
       </div>
     </div>

@@ -38,6 +38,7 @@ import {
   type Settings,
   type TimestampNote
 } from "~lib/messaging"
+import { getDictionary, type Dictionary } from "~lib/i18n"
 import { DIAGNOSE_VERSION } from "~lib/selectors"
 import { usePlayerPort, useSmoothTime, type ConnState } from "~lib/usePlayerPort"
 import "~style.css"
@@ -60,11 +61,11 @@ const COMMENT_SIZE_CLASSES: Record<CommentFontSize, { meta: string; body: string
   lg: { meta: "text-[13px]", body: "text-[15px]" }
 }
 
-const BADGE: Record<ConnState, { label: string; cls: string }> = {
-  connected:  { label: "接続中",              cls: "bg-emerald-500/15 text-emerald-400" },
-  connecting: { label: "接続しています…",      cls: "bg-slate-500/15 text-slate-400" },
-  retrying:   { label: "再接続しています…",    cls: "bg-amber-500/15 text-amber-400" },
-  "no-tab":   { label: "YouTubeタブが未検出",  cls: "bg-rose-500/15 text-rose-400" }
+const BADGE_CLASS: Record<ConnState, string> = {
+  connected:  "bg-emerald-500/15 text-emerald-400",
+  connecting: "bg-slate-500/15 text-slate-400",
+  retrying:   "bg-amber-500/15 text-amber-400",
+  "no-tab":   "bg-rose-500/15 text-rose-400"
 }
 
 const RELATED_SIZE_CLASSES: Record<RelatedDisplaySize, {
@@ -214,6 +215,7 @@ export default function Popout() {
   )
 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
+  const t = getDictionary(settings.language)
 
   // 次に再生キュー。background/SWは関与せずPopout単独で状態を持つ
   // （D-05: SWの責務はウィンドウ管理とタブ解決のみ）。storage.localへ都度保存する。
@@ -507,11 +509,11 @@ export default function Popout() {
     const res = await askContent(tabId, "COMMENT_POST", { text: body })
     setNewCommentPosting(false)
     if (isErr(res)) {
-      setNewCommentError("メイン画面と通信できませんでした。YouTubeタブを再読み込みしてください。")
+      setNewCommentError(t.errCommMain)
       return
     }
     if (!res.data.ok) {
-      setNewCommentError("投稿できませんでした。メイン画面でログインしているか確認してください。")
+      setNewCommentError(t.errPostFailed)
       return
     }
     setNewCommentText("")
@@ -561,7 +563,13 @@ export default function Popout() {
   const diagOk = diag ? Object.values(diag.checks).filter((v) => v.ok).length : 0
   const diagAll = diag ? Object.keys(diag.checks).length : 0
 
-  const badge = BADGE[state]
+  const badgeLabel: Record<ConnState, string> = {
+    connected: t.badgeConnected,
+    connecting: t.badgeConnecting,
+    retrying: t.badgeRetrying,
+    "no-tab": t.badgeNoTab
+  }
+  const badge = { label: badgeLabel[state], cls: BADGE_CLASS[state] }
   const live = status?.kind === "live"
   const displayTime = seeking ?? smoothTime
   const speed = status?.playbackRate ?? 1
@@ -575,7 +583,7 @@ export default function Popout() {
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="YouTubeを検索"
+          placeholder={t.searchPlaceholder}
           disabled={state === "no-tab"}
           className="min-w-0 flex-1 bg-transparent text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none disabled:opacity-40"
         />
@@ -583,7 +591,7 @@ export default function Popout() {
           <button
             type="button"
             onClick={() => setSearchQuery("")}
-            aria-label="検索欄をクリア"
+            aria-label={t.clearSearch}
             className="shrink-0 rounded p-0.5 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300">
             <X size={13} />
           </button>
@@ -593,8 +601,8 @@ export default function Popout() {
           <button
             type="button"
             onClick={() => setSplitView(true)}
-            aria-label="関連動画とコメントを半々で表示"
-            title="関連動画とコメントを半々で表示"
+            aria-label={t.splitView}
+            title={t.splitView}
             className="shrink-0 rounded p-1 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300">
             <Columns2 size={14} />
           </button>
@@ -608,8 +616,8 @@ export default function Popout() {
                 setSplitHorizontal(next)
                 void chrome.storage.local.set({ [LOCAL_KEYS.splitHorizontal]: next })
               }}
-              aria-label={splitHorizontal ? "上下に分割" : "左右に分割"}
-              title={splitHorizontal ? "上下に分割" : "左右に分割"}
+              aria-label={splitHorizontal ? t.splitVertical : t.splitHorizontal}
+              title={splitHorizontal ? t.splitVertical : t.splitHorizontal}
               className="shrink-0 rounded p-1 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300">
               {splitHorizontal ? <Rows2 size={14} /> : <Columns2 size={14} />}
             </button>
@@ -618,15 +626,15 @@ export default function Popout() {
               onClick={() => setSplitView(false)}
               className="flex shrink-0 items-center gap-1 rounded bg-neutral-800 px-2 py-1 text-[11px] text-neutral-300 transition hover:bg-neutral-700 active:scale-95">
               <Minimize2 size={12} />
-              戻る
+              {t.back}
             </button>
           </>
         )}
         <button
           type="button"
           onClick={toggleWindowFullscreen}
-          aria-label={windowFullscreen ? "全画面を解除" : "サブ画面を全画面にする"}
-          title={windowFullscreen ? "全画面を解除" : "サブ画面を全画面にする"}
+          aria-label={windowFullscreen ? t.exitFullscreen : t.enterFullscreen}
+          title={windowFullscreen ? t.exitFullscreen : t.enterFullscreen}
           className="shrink-0 rounded p-1 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300">
           {windowFullscreen ? <Shrink size={14} /> : <Expand size={14} />}
         </button>
@@ -642,8 +650,8 @@ export default function Popout() {
       <main className="flex-1 overflow-y-auto p-4">
         {state === "no-tab" ? (
           <p className="mt-16 text-center text-sm leading-relaxed text-neutral-500">
-            YouTubeの動画ページを開いてください。<br />
-            検出すると自動で接続します。
+            {t.noTabLine1}<br />
+            {t.noTabLine2}
           </p>
         ) : splitView ? (
           <div className="flex h-full flex-col">
@@ -657,19 +665,20 @@ export default function Popout() {
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-800 p-2">
                 <p className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-neutral-400">
                   <ListVideo size={12} className="shrink-0" />
-                  関連動画
-                  {related && <span className="text-neutral-600">（{related.length}件）</span>}
+                  {t.related}
+                  {related && <span className="text-neutral-600">{t.countSuffix(related.length)}</span>}
                 </p>
-                <RelatedSizeControl value={relatedDisplaySize} onChange={updateRelatedDisplaySize} />
+                <RelatedSizeControl value={relatedDisplaySize} onChange={updateRelatedDisplaySize} t={t} />
               </div>
               <ul onScroll={onRelatedScroll} className="min-h-0 flex-1 overflow-y-auto">
                 {(related ?? []).map((item) => (
-                  <RelatedRow key={item.id} item={item} size={relatedDisplaySize} onPlay={playVideo} onQueue={addToQueue} />
+                  <RelatedRow key={item.id} item={item} size={relatedDisplaySize} onPlay={playVideo} onQueue={addToQueue} t={t} />
                 ))}
                 <PagingTail
                   page={relatedPage}
                   itemCount={related?.length ?? 0}
-                  label="関連動画"
+                  label={t.related}
+                  t={t}
                   onRetry={requestMoreRelated}
                   sentinelRef={relatedSentinelRef}
                 />
@@ -696,8 +705,8 @@ export default function Popout() {
               <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800 px-3 py-2">
                 <p className="flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-neutral-400">
                   <MessageSquare size={12} />
-                  コメント
-                  {feed.length > 0 && <span className="text-neutral-600">（{feed.length}件）</span>}
+                  {t.comments}
+                  {feed.length > 0 && <span className="text-neutral-600">{t.countSuffix(feed.length)}</span>}
                 </p>
                 <NewCommentComposer
                   value={newCommentText}
@@ -706,19 +715,21 @@ export default function Popout() {
                   posting={newCommentPosting}
                   disabled={tabId === null}
                   error={newCommentError}
+                  t={t}
                 />
                 <div className="shrink-0">
-                  <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} />
+                  <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} t={t} />
                 </div>
               </div>
               <ul onScroll={onFeedScroll} className="min-h-0 flex-1 overflow-y-auto">
                 {feed.map((item) => (
-                  <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} />
+                  <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} />
                 ))}
                 <PagingTail
                   page={commentPage}
                   itemCount={feed.length}
-                  label="コメント"
+                  label={t.comments}
+                  t={t}
                   onRetry={requestMoreFeed}
                   sentinelRef={commentSentinelRef}
                 />
@@ -731,8 +742,8 @@ export default function Popout() {
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <p className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-neutral-300">
                 <MessageSquare size={13} />
-                コメント
-                {feed.length > 0 && <span className="text-neutral-500">（{feed.length}件）</span>}
+                {t.comments}
+                {feed.length > 0 && <span className="text-neutral-500">{t.countSuffix(feed.length)}</span>}
               </p>
               <NewCommentComposer
                 value={newCommentText}
@@ -741,26 +752,28 @@ export default function Popout() {
                 posting={newCommentPosting}
                 disabled={tabId === null}
                 error={newCommentError}
+                t={t}
               />
               <div className="flex shrink-0 items-center gap-2">
-                <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} />
+                <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} t={t} />
                 <button
                   onClick={() => setCommentsFullscreen(false)}
                   className="flex items-center gap-1 rounded bg-neutral-800 px-2.5 py-1.5 text-[11px] text-neutral-300 transition hover:bg-neutral-700 active:scale-95">
                   <Minimize2 size={12} />
-                  戻る
+                  {t.back}
                 </button>
               </div>
             </div>
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-neutral-800">
               <ul onScroll={onFeedScroll} className="min-h-0 flex-1 overflow-y-auto">
                 {feed.map((item) => (
-                  <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} />
+                  <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} />
                 ))}
                 <PagingTail
                   page={commentPage}
                   itemCount={feed.length}
-                  label="コメント"
+                  label={t.comments}
+                  t={t}
                   onRetry={requestMoreFeed}
                   sentinelRef={commentSentinelRef}
                 />
@@ -796,9 +809,9 @@ export default function Popout() {
             {/* 折りたたみ中は現在の再生状態だけ1行で表示する */}
             {!playerOpen && (
               <p className="mb-4 text-[11px] tabular-nums text-neutral-500">
-                {status?.paused ? "一時停止中" : "再生中"}
+                {status?.paused ? t.paused : t.playing}
                 {" ・ "}
-                {live ? "ライブ" : `${fmt(displayTime)} / ${fmt(status?.duration ?? 0)}`}
+                {live ? t.live : `${fmt(displayTime)} / ${fmt(status?.duration ?? 0)}`}
               </p>
             )}
 
@@ -826,22 +839,22 @@ export default function Popout() {
                   />
                   <div className="mt-1 flex justify-between text-[11px] tabular-nums text-neutral-500">
                     <span>{fmt(displayTime)}</span>
-                    <span>{live ? "ライブ" : fmt(status?.duration ?? 0)}</span>
+                    <span>{live ? t.live : fmt(status?.duration ?? 0)}</span>
                   </div>
                 </section>
 
                 {/* 再生コントロール */}
                 <section className="mb-6 flex items-center justify-center gap-3">
-                  <IconBtn onClick={() => command({ command: "seekBy", value: -10 })} label="10秒戻す">
+                  <IconBtn onClick={() => command({ command: "seekBy", value: -10 })} label={t.seekBack10}>
                     <RotateCcw size={18} />
                   </IconBtn>
                   <button
                     onClick={() => command({ command: "toggle" })}
-                    aria-label={status?.paused ? "再生" : "一時停止"}
+                    aria-label={status?.paused ? t.play : t.pause}
                     className="grid h-14 w-14 place-items-center rounded-full bg-red-600 transition hover:bg-red-500 active:scale-95">
                     {status?.paused ? <Play size={24} fill="currentColor" /> : <Pause size={24} fill="currentColor" />}
                   </button>
-                  <IconBtn onClick={() => command({ command: "seekBy", value: 10 })} label="10秒進める">
+                  <IconBtn onClick={() => command({ command: "seekBy", value: 10 })} label={t.seekForward10}>
                     <RotateCw size={18} />
                   </IconBtn>
                 </section>
@@ -850,7 +863,7 @@ export default function Popout() {
                 <section className="mb-6 flex items-center gap-3">
                   <IconBtn
                     onClick={() => command({ command: "mute", value: !status?.muted })}
-                    label={status?.muted ? "ミュート解除" : "ミュート"}>
+                    label={status?.muted ? t.unmute : t.mute}>
                     {status?.muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
                   </IconBtn>
                   <input
@@ -868,7 +881,7 @@ export default function Popout() {
 
                 {/* 再生速度（0.1刻み） */}
                 <section className="flex items-center justify-between rounded-lg bg-neutral-800 px-4 py-3">
-                  <span className="text-xs text-neutral-400">再生速度</span>
+                  <span className="text-xs text-neutral-400">{t.playbackSpeed}</span>
                   <div className="flex items-center gap-2">
                     <StepBtn onClick={() => command({ command: "speedBy", value: -settings.speedStep })}>−</StepBtn>
                     <button
@@ -889,21 +902,21 @@ export default function Popout() {
                 className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
                 <p className="flex items-center gap-1.5 text-xs font-medium text-neutral-300">
                   <ListVideo size={13} />
-                  関連動画
-                  {related && <span className="text-neutral-500">（{related.length}件）</span>}
+                  {t.related}
+                  {related && <span className="text-neutral-500">{t.countSuffix(related.length)}</span>}
                 </p>
                 {relatedOpen ? <ChevronUp size={14} className="text-neutral-500" /> : <ChevronDown size={14} className="text-neutral-500" />}
               </button>
 
               {relatedOpen && (
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-800 px-4 py-2">
-                  <RelatedSizeControl value={relatedDisplaySize} onChange={updateRelatedDisplaySize} />
+                  <RelatedSizeControl value={relatedDisplaySize} onChange={updateRelatedDisplaySize} t={t} />
                   <button
                     onClick={requestRelated}
                     disabled={tabId === null}
                     className="flex items-center gap-1 rounded bg-neutral-800 px-2.5 py-1.5 text-[11px] text-neutral-300 transition hover:bg-neutral-700 active:scale-95 disabled:opacity-30">
                     <RefreshCw size={12} />
-                    更新する
+                    {t.refresh}
                   </button>
                 </div>
               )}
@@ -911,12 +924,13 @@ export default function Popout() {
               {relatedOpen && (
                 <ul onScroll={onRelatedScroll} className="max-h-[min(55vh,32rem)] overflow-y-auto border-t border-neutral-800">
                   {(related ?? []).map((item) => (
-                    <RelatedRow key={item.id} item={item} size={relatedDisplaySize} onPlay={playVideo} onQueue={addToQueue} />
+                    <RelatedRow key={item.id} item={item} size={relatedDisplaySize} onPlay={playVideo} onQueue={addToQueue} t={t} />
                   ))}
                   <PagingTail
                     page={relatedPage}
                     itemCount={related?.length ?? 0}
-                    label="関連動画"
+                    label={t.related}
+                    t={t}
                     onRetry={requestMoreRelated}
                     sentinelRef={relatedSentinelRef}
                   />
@@ -931,20 +945,20 @@ export default function Popout() {
                 className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
                 <p className="flex items-center gap-1.5 text-xs font-medium text-neutral-300">
                   <ListPlus size={13} />
-                  次に再生
-                  {queue.length > 0 && <span className="text-neutral-500">（{queue.length}件）</span>}
+                  {t.queue}
+                  {queue.length > 0 && <span className="text-neutral-500">{t.countSuffix(queue.length)}</span>}
                 </p>
                 {queueOpen ? <ChevronUp size={14} className="text-neutral-500" /> : <ChevronDown size={14} className="text-neutral-500" />}
               </button>
 
               {queueOpen && queue.length === 0 && (
                 <p className="border-t border-neutral-800 px-4 py-3 text-[11px] text-neutral-500">
-                  関連動画の＋ボタンから追加できます
+                  {t.queueEmptyHint}
                 </p>
               )}
 
               {queueOpen && queue.length > 0 && (
-                <QueueList queue={queue} onPlay={playFromQueue} onRemove={removeFromQueue} onReorder={reorderQueue} />
+                <QueueList queue={queue} onPlay={playFromQueue} onRemove={removeFromQueue} onReorder={reorderQueue} t={t} />
               )}
             </section>
 
@@ -955,21 +969,21 @@ export default function Popout() {
                   onClick={() => setNotesOpen((v) => !v)}
                   className="flex flex-1 items-center gap-1.5 text-left text-xs font-medium text-neutral-300">
                   <StickyNote size={13} />
-                  タイムスタンプメモ
-                  {currentNotes.length > 0 && <span className="text-neutral-500">（{currentNotes.length}件）</span>}
+                  {t.notes}
+                  {currentNotes.length > 0 && <span className="text-neutral-500">{t.countSuffix(currentNotes.length)}</span>}
                 </button>
                 <div className="flex shrink-0 items-center gap-2">
                   <button
                     onClick={startComposingNote}
                     disabled={currentVideoId === null || composingNote !== null}
-                    aria-label="現在の再生位置にメモを追加"
-                    title="現在の再生位置にメモを追加"
+                    aria-label={t.addNoteAtCurrentTime}
+                    title={t.addNoteAtCurrentTime}
                     className="rounded p-1.5 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300 disabled:opacity-30">
                     <Plus size={14} />
                   </button>
                   <button
                     onClick={() => setNotesOpen((v) => !v)}
-                    aria-label={notesOpen ? "折りたたむ" : "開く"}
+                    aria-label={notesOpen ? t.collapse : t.expand}
                     className="rounded p-1.5 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300">
                     {notesOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                   </button>
@@ -979,7 +993,7 @@ export default function Popout() {
               {composingNote !== null && (
                 <div className="border-t border-neutral-800 px-4 py-3">
                   <p className="mb-2 text-[11px] tabular-nums text-neutral-500">
-                    {fmt(composingNote.timestamp)} の位置にメモを追加
+                    {t.addNoteAt(fmt(composingNote.timestamp))}
                   </p>
                   <textarea
                     autoFocus
@@ -995,7 +1009,7 @@ export default function Popout() {
                         cancelComposingNote()
                       }
                     }}
-                    placeholder="メモの内容（Enterで保存 / Escでキャンセル）"
+                    placeholder={t.notePlaceholder}
                     rows={2}
                     className="w-full resize-none rounded bg-neutral-800 px-2.5 py-2 text-xs text-neutral-200 placeholder:text-neutral-600 focus:outline-none"
                   />
@@ -1003,12 +1017,12 @@ export default function Popout() {
                     <button
                       onClick={cancelComposingNote}
                       className="rounded px-2.5 py-1 text-[11px] text-neutral-400 transition hover:bg-neutral-800">
-                      キャンセル
+                      {t.cancel}
                     </button>
                     <button
                       onClick={saveComposingNote}
                       className="rounded bg-red-600 px-2.5 py-1 text-[11px] font-medium text-white transition hover:bg-red-500">
-                      保存
+                      {t.save}
                     </button>
                   </div>
                 </div>
@@ -1016,14 +1030,14 @@ export default function Popout() {
 
               {notesOpen && currentNotes.length === 0 && composingNote === null && (
                 <p className="border-t border-neutral-800 px-4 py-3 text-[11px] text-neutral-500">
-                  再生中に＋ボタンでメモを追加できます
+                  {t.notesEmptyHint}
                 </p>
               )}
 
               {notesOpen && currentNotes.length > 0 && (
                 <ul className="max-h-72 overflow-y-auto border-t border-neutral-800">
                   {currentNotes.map((note) => (
-                    <NoteRow key={note.id} note={note} onJump={jumpToNote} onRemove={removeNote} />
+                    <NoteRow key={note.id} note={note} onJump={jumpToNote} onRemove={removeNote} t={t} />
                   ))}
                 </ul>
               )}
@@ -1036,8 +1050,8 @@ export default function Popout() {
                   onClick={() => setCommentsOpen((v) => !v)}
                   className="flex shrink-0 items-center gap-1.5 text-left text-xs font-medium text-neutral-300">
                   <MessageSquare size={13} />
-                  コメント
-                  {feed.length > 0 && <span className="text-neutral-500">（{feed.length}件）</span>}
+                  {t.comments}
+                  {feed.length > 0 && <span className="text-neutral-500">{t.countSuffix(feed.length)}</span>}
                 </button>
                 {commentsOpen && (
                   <NewCommentComposer
@@ -1047,23 +1061,24 @@ export default function Popout() {
                     posting={newCommentPosting}
                     disabled={tabId === null}
                     error={newCommentError}
+                    t={t}
                   />
                 )}
                 <div className="ml-auto flex shrink-0 items-center gap-2">
                   {commentsOpen && feed.length > 0 && (
-                    <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} />
+                    <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} t={t} />
                   )}
                   {feed.length > 0 && (
                     <button
                       onClick={() => setCommentsFullscreen(true)}
-                      aria-label="画面いっぱいに表示"
+                      aria-label={t.showFullscreen}
                       className="rounded p-1.5 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300">
                       <Maximize2 size={13} />
                     </button>
                   )}
                   <button
                     onClick={() => setCommentsOpen((v) => !v)}
-                    aria-label={commentsOpen ? "折りたたむ" : "開く"}
+                    aria-label={commentsOpen ? t.collapse : t.expand}
                     className="rounded p-1.5 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300">
                     {commentsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                   </button>
@@ -1073,12 +1088,13 @@ export default function Popout() {
               {commentsOpen && (
                 <ul onScroll={onFeedScroll} className="max-h-72 overflow-y-auto border-t border-neutral-800">
                   {feed.map((item) => (
-                    <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} />
+                    <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} />
                   ))}
                   <PagingTail
                     page={commentPage}
                     itemCount={feed.length}
-                    label="コメント"
+                    label={t.comments}
+                    t={t}
                     onRetry={requestMoreFeed}
                     sentinelRef={commentSentinelRef}
                   />
@@ -1092,12 +1108,12 @@ export default function Popout() {
                 <div className="min-w-0">
                   <p className="flex items-center gap-1.5 text-xs font-medium text-neutral-300">
                     <Stethoscope size={13} />
-                    セレクタ診断
+                    {t.diagnostics}
                   </p>
                   <p className="mt-0.5 text-[11px] leading-snug text-neutral-500">
                     {diag
-                      ? `v${diag.v} ・ ${diagOk} / ${diagAll} 項目が見つかりました ・ DOM骨格 ${Object.keys(diag.samples ?? {}).length} 件`
-                      : "YouTube側のDOM変更で壊れた箇所を特定します"}
+                      ? t.diagSummary(diag.v, diagOk, diagAll, Object.keys(diag.samples ?? {}).length)
+                      : t.diagHint}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -1106,14 +1122,14 @@ export default function Popout() {
                       onClick={copyDiagnose}
                       className="flex items-center gap-1 rounded bg-neutral-800 px-2.5 py-1.5 text-[11px] text-neutral-300 transition hover:bg-neutral-700 active:scale-95">
                       {copied ? <Check size={12} /> : <ClipboardCopy size={12} />}
-                      {copied ? "コピーしました" : "結果をコピー"}
+                      {copied ? t.copied : t.copyResult}
                     </button>
                   )}
                   <button
                     onClick={runDiagnose}
                     disabled={diagBusy || tabId === null}
                     className="rounded bg-neutral-100 px-3 py-1.5 text-[11px] font-medium text-neutral-900 transition hover:bg-white active:scale-95 disabled:opacity-30">
-                    {diagBusy ? "診断中…" : "診断する"}
+                    {diagBusy ? t.diagRunning : t.diagRun}
                   </button>
                 </div>
               </div>
@@ -1160,12 +1176,14 @@ function PagingTail({
   page,
   itemCount,
   label,
+  t,
   onRetry,
   sentinelRef
 }: {
   page: PageState
   itemCount: number
   label: string
+  t: Dictionary
   onRetry: () => void
   sentinelRef: React.RefObject<HTMLLIElement>
 }) {
@@ -1175,29 +1193,29 @@ function PagingTail({
     content = (
       <span className="inline-flex items-center gap-1.5">
         <RefreshCw size={11} className="animate-spin" />
-        {label}を読み込んでいます…
+        {t.pagingLoading(label)}
       </span>
     )
   } else if (page.phase === "error") {
     content = (
       <span className="inline-flex flex-wrap items-center justify-center gap-2">
-        <span className="text-rose-400">{page.error || `${label}を読み込めませんでした`}</span>
+        <span className="text-rose-400">{page.error || t.pagingErrorFallback(label)}</span>
         <button
           type="button"
           onClick={onRetry}
           className="rounded bg-neutral-800 px-2 py-1 text-neutral-300 transition hover:bg-neutral-700">
-          再試行
+          {t.pagingRetry}
         </button>
       </span>
     )
   } else if (page.phase === "done" || !page.hasMore) {
     content = itemCount === 0
-      ? `取得できる${label}はありません`
-      : `${label}を最後まで読み込みました（${itemCount}件）`
+      ? t.pagingEmpty(label)
+      : t.pagingDone(label, itemCount)
   } else {
     content = itemCount === 0
-      ? `メイン画面を操作せず${label}を自動で読み込みます…`
-      : `下へ進むと${label}の続きを自動で読み込みます`
+      ? t.pagingAutoFirst(label)
+      : t.pagingAutoMore(label)
   }
 
   return (
@@ -1231,11 +1249,12 @@ function StepBtn({ onClick, children }: { onClick: () => void; children: React.R
 }
 
 /** 関連動画1件。クリックでメイン画面をその動画へ遷移させる */
-function RelatedRow({ item, size, onPlay, onQueue }: {
+function RelatedRow({ item, size, onPlay, onQueue, t }: {
   item: QueueItem
   size: RelatedDisplaySize
   onPlay: (videoId: string) => void
   onQueue: (item: QueueItem) => void
+  t: Dictionary
 }) {
   const cls = RELATED_SIZE_CLASSES[size]
   return (
@@ -1244,7 +1263,7 @@ function RelatedRow({ item, size, onPlay, onQueue }: {
       className="flex items-stretch border-b border-neutral-950 last:border-0">
       <button
         onClick={() => onPlay(item.videoId)}
-        title="メイン画面でこの動画を再生"
+        title={t.playInMain}
         className={`flex min-w-0 flex-1 overflow-hidden text-left transition hover:bg-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-500/70 ${cls.button}`}>
         <div
           style={{ aspectRatio: "16 / 9" }}
@@ -1257,14 +1276,14 @@ function RelatedRow({ item, size, onPlay, onQueue }: {
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <p className={`text-neutral-200 ${cls.title}`}>{item.title || "（タイトルを読み込んでいます…）"}</p>
+          <p className={`text-neutral-200 ${cls.title}`}>{item.title || t.titleLoading}</p>
           <p className={`truncate text-neutral-500 ${cls.channel}`}>{item.channelName || "—"}</p>
         </div>
       </button>
       <button
         onClick={() => onQueue(item)}
-        title="次に再生キューへ追加"
-        aria-label="次に再生キューへ追加"
+        title={t.addToQueue}
+        aria-label={t.addToQueue}
         className="shrink-0 self-center rounded p-1.5 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300">
         <ListPlus size={16} />
       </button>
@@ -1308,11 +1327,12 @@ function RelatedThumbnail({ item }: { item: QueueItem }) {
 }
 
 /** 次に再生キューの本体。dnd-kitでドラッグ並べ替えできる */
-function QueueList({ queue, onPlay, onRemove, onReorder }: {
+function QueueList({ queue, onPlay, onRemove, onReorder, t }: {
   queue: QueueItem[]
   onPlay: (item: QueueItem) => void
   onRemove: (id: string) => void
   onReorder: (activeId: string, overId: string) => void
+  t: Dictionary
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -1336,7 +1356,7 @@ function QueueList({ queue, onPlay, onRemove, onReorder }: {
       <SortableContext items={queue.map((q) => q.id)} strategy={verticalListSortingStrategy}>
         <ul className="border-t border-neutral-800">
           {queue.map((item, index) => (
-            <QueueRow key={item.id} item={item} index={index} onPlay={onPlay} onRemove={onRemove} />
+            <QueueRow key={item.id} item={item} index={index} onPlay={onPlay} onRemove={onRemove} t={t} />
           ))}
         </ul>
       </SortableContext>
@@ -1344,11 +1364,12 @@ function QueueList({ queue, onPlay, onRemove, onReorder }: {
   )
 }
 
-function QueueRow({ item, index, onPlay, onRemove }: {
+function QueueRow({ item, index, onPlay, onRemove, t }: {
   item: QueueItem
   index: number
   onPlay: (item: QueueItem) => void
   onRemove: (id: string) => void
+  t: Dictionary
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
   const style = {
@@ -1365,14 +1386,14 @@ function QueueRow({ item, index, onPlay, onRemove }: {
       <button
         {...attributes}
         {...listeners}
-        aria-label="ドラッグして並べ替え"
+        aria-label={t.dragToReorder}
         className="shrink-0 cursor-grab touch-none rounded p-1.5 text-neutral-600 transition hover:text-neutral-400 active:cursor-grabbing">
         <GripVertical size={14} />
       </button>
       <span className="w-4 shrink-0 text-center text-[10px] tabular-nums text-neutral-600">{index + 1}</span>
       <button
         onClick={() => onPlay(item)}
-        title="この動画を再生してキューから外す"
+        title={t.playAndRemoveFromQueue}
         className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded py-1 text-left transition hover:bg-neutral-800">
         <div
           style={{ aspectRatio: "16 / 9" }}
@@ -1385,14 +1406,14 @@ function QueueRow({ item, index, onPlay, onRemove }: {
           )}
         </div>
         <div className="min-w-0">
-          <p className="line-clamp-2 text-[12px] leading-snug text-neutral-200">{item.title || "（タイトルを読み込んでいます…）"}</p>
+          <p className="line-clamp-2 text-[12px] leading-snug text-neutral-200">{item.title || t.titleLoading}</p>
           <p className="truncate text-[10px] text-neutral-500">{item.channelName || "—"}</p>
         </div>
       </button>
       <button
         onClick={() => onRemove(item.id)}
-        aria-label="キューから削除"
-        title="キューから削除"
+        aria-label={t.removeFromQueue}
+        title={t.removeFromQueue}
         className="shrink-0 rounded p-1.5 text-neutral-600 transition hover:bg-neutral-800 hover:text-neutral-300">
         <Trash2 size={14} />
       </button>
@@ -1400,24 +1421,25 @@ function QueueRow({ item, index, onPlay, onRemove }: {
   )
 }
 
-function NoteRow({ note, onJump, onRemove }: {
+function NoteRow({ note, onJump, onRemove, t }: {
   note: TimestampNote
   onJump: (timestamp: number) => void
   onRemove: (id: string) => void
+  t: Dictionary
 }) {
   return (
     <li className="flex items-start gap-1 border-b border-neutral-950 last:border-0">
       <button
         onClick={() => onJump(note.timestamp)}
-        title="この位置にジャンプ"
+        title={t.jumpToPosition}
         className="min-w-0 flex-1 px-4 py-2.5 text-left transition hover:bg-neutral-950">
         <span className="text-[11px] font-medium tabular-nums text-red-400">{fmt(note.timestamp)}</span>
         <p className="mt-0.5 whitespace-pre-wrap break-words text-[12px] text-neutral-300">{note.content}</p>
       </button>
       <button
         onClick={() => onRemove(note.id)}
-        aria-label="メモを削除"
-        title="削除"
+        aria-label={t.deleteNote}
+        title={t.delete}
         className="shrink-0 self-center rounded p-1.5 text-neutral-600 transition hover:bg-neutral-800 hover:text-rose-400">
         <Trash2 size={13} />
       </button>
@@ -1428,8 +1450,8 @@ function NoteRow({ note, onJump, onRemove }: {
 /** 件数を短く表示する。1000未満はそのまま、以上は"1.2万"のような概算にはせず単純にkカンマ区切り */
 const fmtCount = (n: number) => (n >= 10000 ? `${(n / 10000).toFixed(1)}万` : n.toLocaleString())
 
-function CommentRow({ item, size, tabId, isReply = false }: {
-  item: FeedItem; size: CommentFontSize; tabId: number | null; isReply?: boolean
+function CommentRow({ item, size, tabId, t, isReply = false }: {
+  item: FeedItem; size: CommentFontSize; tabId: number | null; t: Dictionary; isReply?: boolean
 }) {
   const cls = COMMENT_SIZE_CLASSES[size]
 
@@ -1491,11 +1513,11 @@ function CommentRow({ item, size, tabId, isReply = false }: {
     const res = await askContent(tabId, "COMMENT_REPLY", { commentId: item.id, text: body })
     setReplyPosting(false)
     if (isErr(res)) {
-      setReplyError("メイン画面と通信できませんでした。YouTubeタブを再読み込みしてください。")
+      setReplyError(t.errCommMain)
       return
     }
     if (!res.data.ok) {
-      setReplyError("返信できませんでした。メイン画面でログインしているか確認してください。")
+      setReplyError(t.errReplyFailed)
       return
     }
     setReplyText("")
@@ -1508,7 +1530,7 @@ function CommentRow({ item, size, tabId, isReply = false }: {
       setRepliesOpen(true)
       setReplyNotice(null)
     } else {
-      setReplyNotice("返信を投稿しました（一覧の再取得はできませんでした）")
+      setReplyNotice(t.replyPostedNoticeNoRefresh)
     }
   }
 
@@ -1542,7 +1564,7 @@ function CommentRow({ item, size, tabId, isReply = false }: {
             onClick={toggleLike}
             disabled={tabId === null || likeBusy}
             aria-pressed={liked}
-            aria-label={liked ? "いいねを取り消す" : "いいね"}
+            aria-label={liked ? t.unlike : t.like}
             className={`flex items-center gap-1 rounded px-1 py-0.5 text-[11px] transition disabled:opacity-40 ${
               liked ? "text-red-500" : "text-neutral-500 hover:text-neutral-300"
             }`}>
@@ -1563,7 +1585,7 @@ function CommentRow({ item, size, tabId, isReply = false }: {
                 <ChevronDown size={12} />
               )}
               <CornerDownRight size={12} />
-              返信 {displayReplyCount}件
+              {t.replyCount(displayReplyCount ?? 0)}
             </button>
           )}
 
@@ -1576,7 +1598,7 @@ function CommentRow({ item, size, tabId, isReply = false }: {
               }}
               disabled={tabId === null}
               className="rounded px-1 py-0.5 text-[11px] text-neutral-500 transition hover:text-neutral-300 disabled:opacity-40">
-              返信する
+              {t.replyAction}
             </button>
           )}
         </div>
@@ -1596,7 +1618,7 @@ function CommentRow({ item, size, tabId, isReply = false }: {
                   setReplyText("")
                 }
               }}
-              placeholder="返信を入力"
+              placeholder={t.replyPlaceholder}
               rows={2}
               className="w-full resize-none rounded bg-neutral-800 px-2 py-1.5 text-[12px] text-neutral-200 placeholder:text-neutral-600 focus:outline-none"
             />
@@ -1608,13 +1630,13 @@ function CommentRow({ item, size, tabId, isReply = false }: {
                   setReplyText("")
                 }}
                 className="rounded px-2 py-1 text-[11px] text-neutral-400 transition hover:bg-neutral-800">
-                キャンセル
+                {t.cancel}
               </button>
               <button
                 onClick={postReply}
                 disabled={replyPosting || !replyText.trim()}
                 className="rounded bg-red-600 px-2 py-1 text-[11px] font-medium text-white transition hover:bg-red-500 disabled:opacity-40">
-                {replyPosting ? "投稿中…" : "投稿"}
+                {replyPosting ? t.posting : t.postButton}
               </button>
             </div>
           </div>
@@ -1623,12 +1645,12 @@ function CommentRow({ item, size, tabId, isReply = false }: {
         {repliesOpen && replies && replies.length > 0 && (
           <ul className="mt-1 border-l border-neutral-800 pl-2">
             {replies.map((reply) => (
-              <CommentRow key={reply.id} item={reply} size={size} tabId={tabId} isReply />
+              <CommentRow key={reply.id} item={reply} size={size} tabId={tabId} t={t} isReply />
             ))}
           </ul>
         )}
         {repliesOpen && replies && replies.length === 0 && (
-          <p className="mt-1 pl-2 text-[11px] text-neutral-600">返信を取得できませんでした</p>
+          <p className="mt-1 pl-2 text-[11px] text-neutral-600">{t.repliesUnavailable}</p>
         )}
         {replyNotice && (
           <p className="mt-1 pl-2 text-[11px] text-neutral-500">{replyNotice}</p>
@@ -1698,13 +1720,14 @@ function CommentBody({ item, tabId }: { item: FeedItem; tabId: number | null }) 
   )
 }
 
-function NewCommentComposer({ value, onChange, onSubmit, posting, disabled, error }: {
+function NewCommentComposer({ value, onChange, onSubmit, posting, disabled, error, t }: {
   value: string
   onChange: (value: string) => void
   onSubmit: () => void
   posting: boolean
   disabled: boolean
   error: string | null
+  t: Dictionary
 }) {
   // 見出し行に横並びで置くため、通常は1行分の高さに収める。
   // ★ textareaのままにしてShift+Enterの改行を残す（inputに変えると複数行コメントが打てなくなる）。
@@ -1724,7 +1747,7 @@ function NewCommentComposer({ value, onChange, onSubmit, posting, disabled, erro
               onChange("")
             }
           }}
-          placeholder="コメントを追加"
+          placeholder={t.commentPlaceholder}
           disabled={disabled}
           rows={value.includes("\n") ? 3 : 1}
           className="min-w-0 flex-1 resize-none rounded bg-neutral-800 px-2 py-1 text-[11px] leading-5 text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:ring-1 focus:ring-neutral-600 disabled:opacity-40"
@@ -1733,7 +1756,7 @@ function NewCommentComposer({ value, onChange, onSubmit, posting, disabled, erro
           <>
             <button
               onClick={() => onChange("")}
-              aria-label="キャンセル"
+              aria-label={t.cancel}
               className="shrink-0 rounded p-1 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300">
               <X size={12} />
             </button>
@@ -1741,7 +1764,7 @@ function NewCommentComposer({ value, onChange, onSubmit, posting, disabled, erro
               onClick={onSubmit}
               disabled={posting}
               className="shrink-0 rounded bg-red-600 px-2 py-1 text-[10px] font-medium text-white transition hover:bg-red-500 disabled:opacity-40">
-              {posting ? "投稿中…" : "投稿"}
+              {posting ? t.posting : t.postButton}
             </button>
           </>
         )}
@@ -1751,13 +1774,13 @@ function NewCommentComposer({ value, onChange, onSubmit, posting, disabled, erro
   )
 }
 
-function FontSizeControl({ value, onChange }: {
-  value: CommentFontSize; onChange: (size: CommentFontSize) => void
+function FontSizeControl({ value, onChange, t }: {
+  value: CommentFontSize; onChange: (size: CommentFontSize) => void; t: Dictionary
 }) {
   const OPTIONS: { key: CommentFontSize; label: string }[] = [
-    { key: "sm", label: "小" },
-    { key: "md", label: "中" },
-    { key: "lg", label: "大" }
+    { key: "sm", label: t.small },
+    { key: "md", label: t.medium },
+    { key: "lg", label: t.large }
   ]
   return (
     <div className="flex items-center overflow-hidden rounded border border-neutral-700">
@@ -1765,7 +1788,7 @@ function FontSizeControl({ value, onChange }: {
         <button
           key={opt.key}
           onClick={() => onChange(opt.key)}
-          aria-label={`文字サイズ: ${opt.label}`}
+          aria-label={t.fontSizeLabel(opt.label)}
           className={`px-1.5 py-1 text-[10px] transition ${
             value === opt.key
               ? "bg-neutral-700 text-neutral-100"
@@ -1778,26 +1801,27 @@ function FontSizeControl({ value, onChange }: {
   )
 }
 
-function RelatedSizeControl({ value, onChange }: {
+function RelatedSizeControl({ value, onChange, t }: {
   value: RelatedDisplaySize
   onChange: (size: RelatedDisplaySize) => void
+  t: Dictionary
 }) {
   const OPTIONS: { key: RelatedDisplaySize; label: string }[] = [
-    { key: "sm", label: "小" },
-    { key: "md", label: "中" },
-    { key: "lg", label: "大" }
+    { key: "sm", label: t.small },
+    { key: "md", label: t.medium },
+    { key: "lg", label: t.large }
   ]
   return (
     <div
       role="group"
-      aria-label="関連動画の表示サイズ"
+      aria-label={t.relatedSizeGroupLabel}
       className="flex max-w-full shrink-0 items-center overflow-hidden rounded border border-neutral-700">
       {OPTIONS.map((opt) => (
         <button
           key={opt.key}
           type="button"
           onClick={() => onChange(opt.key)}
-          aria-label={`関連動画の表示サイズ: ${opt.label}`}
+          aria-label={t.relatedSizeLabel(opt.label)}
           aria-pressed={value === opt.key}
           className={`px-1.5 py-1 text-[10px] transition focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-500/70 ${
             value === opt.key

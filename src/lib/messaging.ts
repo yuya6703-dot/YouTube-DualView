@@ -17,6 +17,7 @@ export interface Settings {
   feedMaxRows: number     // チャット保持上限（メモリリーク防止）
   autoOpenPopout: boolean // YouTubeの動画ページを開いたら自動でサブ画面を開く
   autoClosePopout: boolean // 対象のYouTubeタブが全部閉じられたらサブ画面も閉じる
+  language: "ja" | "en"   // 拡張機能自体のUI言語（YouTube側の表示言語とは独立）
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -25,7 +26,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoPlayNext: true,
   feedMaxRows: 300,
   autoOpenPopout: true,
-  autoClosePopout: true
+  autoClosePopout: true,
+  language: "ja"
 }
 
 export interface QueueItem {
