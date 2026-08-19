@@ -21,7 +21,7 @@ import {
   verticalListSortingStrategy
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Check, ChevronDown, ChevronUp, ClipboardCopy, Columns2, CornerDownRight, Expand, GripVertical, ListPlus, ListVideo, Loader2, Maximize2, MessageSquare, Minimize2, Pause, Play, Plus, RefreshCw, RotateCcw, RotateCw, Rows2, Search, Shrink, Stethoscope, StickyNote, ThumbsUp, Trash2, Volume2, VolumeX, X } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, ClipboardCopy, Columns2, CornerDownRight, Expand, GripVertical, ListPlus, ListVideo, Loader2, Maximize2, MessageSquare, Minimize2, Pause, Pin, Play, Plus, RefreshCw, RotateCcw, RotateCw, Rows2, Search, Shrink, Stethoscope, StickyNote, ThumbsUp, Trash2, Volume2, VolumeX, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import {
   DEFAULT_RELATED_DISPLAY_SIZE,
@@ -1520,6 +1520,13 @@ function CommentRow({ item, size, tabId, isReply = false }: {
         )}
       </div>
       <div className="min-w-0 flex-1">
+        {/* 固定コメントの帯。YouTube本体と同じく投稿者名の上に出す */}
+        {item.pinnedLabel && (
+          <p className="flex items-center gap-1 text-[10px] text-neutral-500">
+            <Pin size={10} className="shrink-0" />
+            <span className="truncate">{item.pinnedLabel}</span>
+          </p>
+        )}
         <p className={`flex items-baseline gap-1.5 text-neutral-400 ${cls.meta}`}>
           <span className="truncate font-medium text-neutral-300">{item.author || "—"}</span>
           {item.publishedAt && <span className="shrink-0 text-neutral-600">{item.publishedAt}</span>}

@@ -932,6 +932,7 @@ function parseCommentThread(el: Element): FeedItem | null {
   const likeButton = q<HTMLElement>(SELECTORS.comments.likeButton, el)
   const likeCount = readLikeCount(el)
   const replyCount = readReplyCount(el)
+  const pinnedLabel = text(SELECTORS.comments.pinnedBadge, el)
   return {
     // permalinkのlc、またはDOM内容由来のfallback hashを安定キーにする。
     id,
@@ -942,7 +943,8 @@ function parseCommentThread(el: Element): FeedItem | null {
     ...(publishedAt ? { publishedAt } : {}),
     ...(likeButton ? { liked: readLikedState(likeButton) } : {}),
     ...(likeCount !== undefined ? { likeCount } : {}),
-    ...(replyCount ? { replyCount } : {})
+    ...(replyCount ? { replyCount } : {}),
+    ...(pinnedLabel ? { pinnedLabel } : {})
   }
 }
 

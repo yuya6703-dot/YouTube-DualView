@@ -122,6 +122,15 @@ export const SELECTORS = {
     avatar: ["#author-thumbnail img", "#img"],
     body: ["#content-text"],
     published: ["#published-time-text a", "#published-time-text"],
+    // 「@channel さんによって固定されています」の帯。実機確認済み（2026-08-19）。
+    // ★ 新世代は ytw- 接頭辞（ytd- ではない）。世代差に振り回されないよう
+    //   安定したid #pinned-comment-badge を先頭に置き、レンダラー名は保険として残す。
+    //   文言はYouTube側のものをそのまま使う（自前で組み立てると多言語で破綻するため）。
+    pinnedBadge: [
+      "#pinned-comment-badge",
+      "ytw-pinned-comment-badge-renderer",
+      "ytd-pinned-comment-badge-renderer"
+    ],
     // 実機確認済み（2026-08-19）
     likeButton: [
       "#like-button button",
@@ -368,7 +377,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 34
+export const DIAGNOSE_VERSION = 35
 
 export type DiagnoseReport = {
   v: number

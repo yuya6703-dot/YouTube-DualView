@@ -68,6 +68,8 @@ export interface FeedItem {
   liked?: boolean      // メイン画面上での「いいね」状態
   replyCount?: number  // 0または未定義なら返信なし
   parentId?: string    // 返信コメントの場合、親コメントのid（未定義ならトップレベル）
+  // 固定コメントの帯。YouTube側の文言をそのまま入れる（例: "@channel さんによって固定されています"）
+  pinnedLabel?: string
 }
 
 export type VideoKind = "video" | "live" | "archive" | "unknown"
