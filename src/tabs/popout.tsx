@@ -1,7 +1,7 @@
 /**
  * src/tabs/popout.tsx → build後 tabs/popout.html
- * サブ画面: プレイヤー操作、関連動画、通常コメント、検索、診断、次に再生キューを表示する。
- * タイムスタンプメモは未実装。
+ * サブ画面: プレイヤー操作、関連動画、通常コメント、検索、診断、次に再生キュー、
+ * タイムスタンプメモを表示する。
  */
 import {
   DndContext,
@@ -21,7 +21,7 @@ import {
   verticalListSortingStrategy
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Check, ChevronDown, ChevronUp, ClipboardCopy, Columns2, CornerDownRight, Expand, GripVertical, ListPlus, ListVideo, Loader2, Maximize2, MessageSquare, Minimize2, Pause, Play, RefreshCw, RotateCcw, RotateCw, Rows2, Search, Shrink, Stethoscope, ThumbsUp, Trash2, Volume2, VolumeX, X } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, ClipboardCopy, Columns2, CornerDownRight, Expand, GripVertical, ListPlus, ListVideo, Loader2, Maximize2, MessageSquare, Minimize2, Pause, Play, Plus, RefreshCw, RotateCcw, RotateCw, Rows2, Search, Shrink, Stethoscope, StickyNote, ThumbsUp, Trash2, Volume2, VolumeX, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import {
   DEFAULT_RELATED_DISPLAY_SIZE,
@@ -35,7 +35,8 @@ import {
   type PageState,
   type QueueItem,
   type RelatedDisplaySize,
-  type Settings
+  type Settings,
+  type TimestampNote
 } from "~lib/messaging"
 import { DIAGNOSE_VERSION } from "~lib/selectors"
 import { usePlayerPort, useSmoothTime, type ConnState } from "~lib/usePlayerPort"
@@ -220,6 +221,17 @@ export default function Popout() {
   const [queueOpen, setQueueOpen] = useState(true)
   const queueLoaded = useRef(false) // 読み込み完了前の空配列を誤って保存しないためのガード
 
+  // タイムスタンプメモ。動画IDごとの配列としてPopout単独でstorage.localへ保存する
+  // （D-05: SWは関与しない。キューと同じ理由）
+  const [notesByVideo, setNotesByVideo] = useState<Record<string, TimestampNote[]>>({})
+  const [notesOpen, setNotesOpen] = useState(true)
+  const notesLoaded = useRef(false)
+  const [composingNote, setComposingNote] = useState<{ timestamp: number; text: string } | null>(null)
+
+  // 新規コメントの投稿。投稿自体の反映は既存のコメント自動監視(FEED_APPEND)に任せる
+  const [newCommentText, setNewCommentText] = useState("")
+  const [newCommentPosting, setNewCommentPosting] = useState(false)
+
   // 前回選んだ文字サイズと、options.tsxで変更された設定を読み込む
   // 開いている間の設定ページからの変更もstorage.onChangedで即時反映する。
   useEffect(() => {
@@ -238,6 +250,9 @@ export default function Popout() {
     const applyQueue = (value: unknown) => {
       if (Array.isArray(value)) setQueue(value as QueueItem[])
     }
+    const applyNotes = (value: unknown) => {
+      if (value && typeof value === "object") setNotesByVideo(value as Record<string, TimestampNote[]>)
+    }
 
     chrome.storage.local.get([
       LOCAL_KEYS.commentFontSize,
@@ -245,7 +260,8 @@ export default function Popout() {
       LOCAL_KEYS.settings,
       LOCAL_KEYS.splitHorizontal,
       LOCAL_KEYS.splitRatio,
-      LOCAL_KEYS.queue
+      LOCAL_KEYS.queue,
+      LOCAL_KEYS.notes
     ]).then((r) => {
       applyFontSize(r[LOCAL_KEYS.commentFontSize])
       applyRelatedDisplaySize(r[LOCAL_KEYS.relatedDisplaySize])
@@ -255,6 +271,8 @@ export default function Popout() {
       if (typeof ratio === "number" && ratio >= 0.2 && ratio <= 0.8) setSplitRatio(ratio)
       applyQueue(r[LOCAL_KEYS.queue])
       queueLoaded.current = true
+      applyNotes(r[LOCAL_KEYS.notes])
+      notesLoaded.current = true
     })
 
     const handleStorageChange = (
@@ -279,6 +297,11 @@ export default function Popout() {
     if (!queueLoaded.current) return
     void chrome.storage.local.set({ [LOCAL_KEYS.queue]: queue })
   }, [queue])
+
+  useEffect(() => {
+    if (!notesLoaded.current) return
+    void chrome.storage.local.set({ [LOCAL_KEYS.notes]: notesByVideo })
+  }, [notesByVideo])
 
   const updateCommentFontSize = (size: CommentFontSize) => {
     setCommentFontSize(size)
@@ -313,6 +336,51 @@ export default function Popout() {
       if (from === -1 || to === -1) return prev
       return arrayMove(prev, from, to)
     })
+  }
+
+  const currentVideoId = status?.videoId ?? null
+  const currentNotes = currentVideoId ? notesByVideo[currentVideoId] ?? [] : []
+
+  /** ＋ボタン押下時点の再生位置を凍結してメモ入力欄を開く */
+  const startComposingNote = () => {
+    if (currentVideoId === null) return
+    setComposingNote({ timestamp: seeking ?? smoothTime, text: "" })
+  }
+
+  const cancelComposingNote = () => setComposingNote(null)
+
+  const saveComposingNote = () => {
+    if (composingNote === null || currentVideoId === null) return
+    const content = composingNote.text.trim()
+    if (!content) {
+      setComposingNote(null)
+      return
+    }
+    const note: TimestampNote = {
+      id: crypto.randomUUID(),
+      videoId: currentVideoId,
+      timestamp: composingNote.timestamp,
+      content,
+      createdAt: Date.now()
+    }
+    setNotesByVideo((prev) => {
+      const existing = prev[currentVideoId] ?? []
+      return { ...prev, [currentVideoId]: [...existing, note].sort((a, b) => a.timestamp - b.timestamp) }
+    })
+    setComposingNote(null)
+  }
+
+  const removeNote = (id: string) => {
+    if (currentVideoId === null) return
+    setNotesByVideo((prev) => {
+      const existing = prev[currentVideoId] ?? []
+      return { ...prev, [currentVideoId]: existing.filter((n) => n.id !== id) }
+    })
+  }
+
+  /** メモの時刻へジャンプする。クリック起点なのでメイン画面のフルスクリーンも維持される */
+  const jumpToNote = (timestamp: number) => {
+    command({ command: "seek", value: timestamp })
   }
 
   // 自動連続再生: 動画終了(ended)への立ち上がりを検知したときだけ次を再生する。
@@ -419,6 +487,17 @@ export default function Popout() {
     related?.length ?? 0,
     requestMoreRelated
   )
+
+  const postNewComment = async () => {
+    if (tabId === null || newCommentPosting) return
+    const body = newCommentText.trim()
+    if (!body) return
+    setNewCommentPosting(true)
+    const res = await askContent(tabId, "COMMENT_POST", { text: body })
+    setNewCommentPosting(false)
+    if (isErr(res) || !res.data.ok) return
+    setNewCommentText("")
+  }
 
   const [searchQuery, setSearchQuery] = useState("")
   const runSearch = (e: React.FormEvent) => {
@@ -603,6 +682,13 @@ export default function Popout() {
                 </p>
                 <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} />
               </div>
+              <NewCommentComposer
+                value={newCommentText}
+                onChange={setNewCommentText}
+                onSubmit={() => void postNewComment()}
+                posting={newCommentPosting}
+                disabled={tabId === null}
+              />
               <ul onScroll={onFeedScroll} className="min-h-0 flex-1 overflow-y-auto">
                 {feed.map((item) => (
                   <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} />
@@ -830,6 +916,87 @@ export default function Popout() {
               )}
             </section>
 
+            {/* タイムスタンプメモ —— Phase 2: 現在の再生位置にメモを残し、クリックでジャンプする */}
+            <section className="mt-6 rounded-lg border border-neutral-800">
+              <div className="flex items-center justify-between gap-3 px-4 py-3">
+                <button
+                  onClick={() => setNotesOpen((v) => !v)}
+                  className="flex flex-1 items-center gap-1.5 text-left text-xs font-medium text-neutral-300">
+                  <StickyNote size={13} />
+                  タイムスタンプメモ
+                  {currentNotes.length > 0 && <span className="text-neutral-500">（{currentNotes.length}件）</span>}
+                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    onClick={startComposingNote}
+                    disabled={currentVideoId === null || composingNote !== null}
+                    aria-label="現在の再生位置にメモを追加"
+                    title="現在の再生位置にメモを追加"
+                    className="rounded p-1.5 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300 disabled:opacity-30">
+                    <Plus size={14} />
+                  </button>
+                  <button
+                    onClick={() => setNotesOpen((v) => !v)}
+                    aria-label={notesOpen ? "折りたたむ" : "開く"}
+                    className="rounded p-1.5 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300">
+                    {notesOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                </div>
+              </div>
+
+              {composingNote !== null && (
+                <div className="border-t border-neutral-800 px-4 py-3">
+                  <p className="mb-2 text-[11px] tabular-nums text-neutral-500">
+                    {fmt(composingNote.timestamp)} の位置にメモを追加
+                  </p>
+                  <textarea
+                    autoFocus
+                    value={composingNote.text}
+                    onChange={(e) =>
+                      setComposingNote((prev) => (prev ? { ...prev, text: e.target.value } : prev))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault()
+                        saveComposingNote()
+                      } else if (e.key === "Escape") {
+                        cancelComposingNote()
+                      }
+                    }}
+                    placeholder="メモの内容（Enterで保存 / Escでキャンセル）"
+                    rows={2}
+                    className="w-full resize-none rounded bg-neutral-800 px-2.5 py-2 text-xs text-neutral-200 placeholder:text-neutral-600 focus:outline-none"
+                  />
+                  <div className="mt-2 flex justify-end gap-2">
+                    <button
+                      onClick={cancelComposingNote}
+                      className="rounded px-2.5 py-1 text-[11px] text-neutral-400 transition hover:bg-neutral-800">
+                      キャンセル
+                    </button>
+                    <button
+                      onClick={saveComposingNote}
+                      className="rounded bg-red-600 px-2.5 py-1 text-[11px] font-medium text-white transition hover:bg-red-500">
+                      保存
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {notesOpen && currentNotes.length === 0 && composingNote === null && (
+                <p className="border-t border-neutral-800 px-4 py-3 text-[11px] text-neutral-500">
+                  再生中に＋ボタンでメモを追加できます
+                </p>
+              )}
+
+              {notesOpen && currentNotes.length > 0 && (
+                <ul className="max-h-72 overflow-y-auto border-t border-neutral-800">
+                  {currentNotes.map((note) => (
+                    <NoteRow key={note.id} note={note} onJump={jumpToNote} onRemove={removeNote} />
+                  ))}
+                </ul>
+              )}
+            </section>
+
             {/* コメント —— Phase 1: DOMを自動監視して流れてくる。装飾UI(絵文字トークン等)はPhase 2 */}
             <section className="mt-6 rounded-lg border border-neutral-800">
               <div className="flex items-center justify-between gap-3 px-4 py-3">
@@ -860,6 +1027,16 @@ export default function Popout() {
                   </button>
                 </div>
               </div>
+
+              {commentsOpen && (
+                <NewCommentComposer
+                  value={newCommentText}
+                  onChange={setNewCommentText}
+                  onSubmit={() => void postNewComment()}
+                  posting={newCommentPosting}
+                  disabled={tabId === null}
+                />
+              )}
 
               {commentsOpen && (
                 <ul onScroll={onFeedScroll} className="max-h-72 overflow-y-auto border-t border-neutral-800">
@@ -1191,6 +1368,31 @@ function QueueRow({ item, index, onPlay, onRemove }: {
   )
 }
 
+function NoteRow({ note, onJump, onRemove }: {
+  note: TimestampNote
+  onJump: (timestamp: number) => void
+  onRemove: (id: string) => void
+}) {
+  return (
+    <li className="flex items-start gap-1 border-b border-neutral-950 last:border-0">
+      <button
+        onClick={() => onJump(note.timestamp)}
+        title="この位置にジャンプ"
+        className="min-w-0 flex-1 px-4 py-2.5 text-left transition hover:bg-neutral-950">
+        <span className="text-[11px] font-medium tabular-nums text-red-400">{fmt(note.timestamp)}</span>
+        <p className="mt-0.5 whitespace-pre-wrap break-words text-[12px] text-neutral-300">{note.content}</p>
+      </button>
+      <button
+        onClick={() => onRemove(note.id)}
+        aria-label="メモを削除"
+        title="削除"
+        className="shrink-0 self-center rounded p-1.5 text-neutral-600 transition hover:bg-neutral-800 hover:text-rose-400">
+        <Trash2 size={13} />
+      </button>
+    </li>
+  )
+}
+
 /** 件数を短く表示する。1000未満はそのまま、以上は"1.2万"のような概算にはせず単純にkカンマ区切り */
 const fmtCount = (n: number) => (n >= 10000 ? `${(n / 10000).toFixed(1)}万` : n.toLocaleString())
 
@@ -1219,6 +1421,9 @@ function CommentRow({ item, size, tabId, isReply = false }: {
   const [repliesOpen, setRepliesOpen] = useState(false)
   const [replies, setReplies] = useState<FeedItem[] | null>(null)
   const [repliesLoading, setRepliesLoading] = useState(false)
+  // 読み込み済みなら実件数、未読み込みならDOM取得時点のスナップショット値を使う
+  // （自分で返信を投稿した直後は元のreplyCountが古くなるため）
+  const displayReplyCount = replies ? replies.length : item.replyCount
 
   const toggleReplies = async () => {
     if (repliesOpen) {
@@ -1236,6 +1441,25 @@ function CommentRow({ item, size, tabId, isReply = false }: {
     if (isErr(res)) return
     setReplies(res.data.items)
     setRepliesOpen(true)
+  }
+
+  // 返信の投稿
+  const [replying, setReplying] = useState(false)
+  const [replyText, setReplyText] = useState("")
+  const [replyPosting, setReplyPosting] = useState(false)
+
+  const postReply = async () => {
+    if (tabId === null || replyPosting) return
+    const body = replyText.trim()
+    if (!body) return
+    setReplyPosting(true)
+    const res = await askContent(tabId, "COMMENT_REPLY", { commentId: item.id, text: body })
+    setReplyPosting(false)
+    if (isErr(res) || !res.data.ok) return
+    setReplies(res.data.items)
+    setRepliesOpen(true)
+    setReplyText("")
+    setReplying(false)
   }
 
   return (
@@ -1267,7 +1491,7 @@ function CommentRow({ item, size, tabId, isReply = false }: {
             {likeCount !== undefined && likeCount > 0 && <span className="tabular-nums">{fmtCount(likeCount)}</span>}
           </button>
 
-          {!isReply && !!item.replyCount && (
+          {!isReply && !!displayReplyCount && (
             <button
               onClick={toggleReplies}
               disabled={repliesLoading}
@@ -1280,10 +1504,57 @@ function CommentRow({ item, size, tabId, isReply = false }: {
                 <ChevronDown size={12} />
               )}
               <CornerDownRight size={12} />
-              返信 {item.replyCount}件
+              返信 {displayReplyCount}件
+            </button>
+          )}
+
+          {!isReply && (
+            <button
+              onClick={() => setReplying((v) => !v)}
+              disabled={tabId === null}
+              className="rounded px-1 py-0.5 text-[11px] text-neutral-500 transition hover:text-neutral-300 disabled:opacity-40">
+              返信する
             </button>
           )}
         </div>
+
+        {!isReply && replying && (
+          <div className="mt-1.5">
+            <textarea
+              autoFocus
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  void postReply()
+                } else if (e.key === "Escape") {
+                  setReplying(false)
+                  setReplyText("")
+                }
+              }}
+              placeholder="返信を入力"
+              rows={2}
+              className="w-full resize-none rounded bg-neutral-800 px-2 py-1.5 text-[12px] text-neutral-200 placeholder:text-neutral-600 focus:outline-none"
+            />
+            <div className="mt-1 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setReplying(false)
+                  setReplyText("")
+                }}
+                className="rounded px-2 py-1 text-[11px] text-neutral-400 transition hover:bg-neutral-800">
+                キャンセル
+              </button>
+              <button
+                onClick={postReply}
+                disabled={replyPosting || !replyText.trim()}
+                className="rounded bg-red-600 px-2 py-1 text-[11px] font-medium text-white transition hover:bg-red-500 disabled:opacity-40">
+                {replyPosting ? "投稿中…" : "投稿"}
+              </button>
+            </div>
+          </div>
+        )}
 
         {repliesOpen && replies && replies.length > 0 && (
           <ul className="mt-1 border-l border-neutral-800 pl-2">
@@ -1297,6 +1568,48 @@ function CommentRow({ item, size, tabId, isReply = false }: {
         )}
       </div>
     </li>
+  )
+}
+
+function NewCommentComposer({ value, onChange, onSubmit, posting, disabled }: {
+  value: string
+  onChange: (value: string) => void
+  onSubmit: () => void
+  posting: boolean
+  disabled: boolean
+}) {
+  return (
+    <div className="border-t border-neutral-800 px-4 py-2.5">
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault()
+            onSubmit()
+          }
+        }}
+        placeholder="コメントを追加"
+        disabled={disabled}
+        rows={value ? 2 : 1}
+        className="w-full resize-none rounded bg-neutral-800 px-2.5 py-1.5 text-xs text-neutral-200 placeholder:text-neutral-600 focus:outline-none disabled:opacity-40"
+      />
+      {value.trim() && (
+        <div className="mt-1.5 flex justify-end gap-2">
+          <button
+            onClick={() => onChange("")}
+            className="rounded px-2.5 py-1 text-[11px] text-neutral-400 transition hover:bg-neutral-800">
+            キャンセル
+          </button>
+          <button
+            onClick={onSubmit}
+            disabled={posting}
+            className="rounded bg-red-600 px-2.5 py-1 text-[11px] font-medium text-white transition hover:bg-red-500 disabled:opacity-40">
+            {posting ? "投稿中…" : "投稿"}
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 

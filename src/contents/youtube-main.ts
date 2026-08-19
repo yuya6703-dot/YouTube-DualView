@@ -770,6 +770,35 @@ function readReplyCount(el: Element): number | undefined {
   return parseApproxCount(raw)
 }
 
+/**
+ * 新規コメント/返信の共通投稿処理。
+ * 入力欄はcontenteditableなdivで、Reactの制御コンポーネントのように
+ * textContentを直接書き換えるだけではYouTube側の内部状態（投稿ボタンの活性化）が
+ * 更新されない。execCommand("insertText")は非推奨だがcontenteditable編集領域に対しては
+ * 今も動作し、本物のinputイベントを発火させるため、YouTube側のリスナーに正しく伝わる
+ * （2026-08-19 実機確認: これがないと投稿ボタンがdisabledのまま変化しない）。
+ */
+async function submitCommentBox(box: Element, text_: string): Promise<boolean> {
+  const editable = q<HTMLElement>(SELECTORS.comments.commentBoxEditable, box)
+  if (!editable) return false
+
+  editable.focus()
+  document.execCommand("insertText", false, text_)
+  // execCommandが効かない環境向けの保険。反映されていなければ手動でイベントも発火する。
+  if ((editable.textContent ?? "").trim().length === 0 && text_.trim().length > 0) {
+    editable.textContent = text_
+    editable.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "insertText", data: text_ }))
+  }
+
+  // 投稿ボタンの活性化はYouTube側の内部状態更新を経るため、反映を少し待つ
+  await new Promise((resolve) => window.setTimeout(resolve, 300))
+
+  const submit = q<HTMLElement>(SELECTORS.comments.commentBoxSubmit, box)
+  if (!submit || submit.matches(":disabled, [disabled], [aria-disabled='true']")) return false
+  submit.click()
+  return true
+}
+
 function parseCommentThread(el: Element): FeedItem | null {
   const publishedAt = text(SELECTORS.comments.published, el)
   const id = getStableCommentId(el)
@@ -1598,9 +1627,14 @@ registerHandlers({
       if (toggle && !toggle.matches(":disabled, [disabled], [aria-disabled='true']")) {
         toggle.click()
       }
-      // 返信の読み込み自体はYouTube側の非同期処理。「続きを読み込む」と同様に
-      // 短い間隔で数回だけ様子を見る（他機能のリトライ間隔に合わせて700ms間隔）。
+      // 展開ボタンを押しても、返信本体はcontinuation-item-renderer側の
+      // IntersectionObserverで別途遅延読み込みされる（related動画/コメント本体と同じ罠）。
+      // メイン画面を実際にスクロールしない前提のこの拡張では自然には交差しないため、
+      // 短い間隔で様子を見ながらnudgeIntoViewportで刺激する（他機能に合わせて700ms間隔）。
       for (let attempt = 0; attempt < 6; attempt++) {
+        const target = findCommentElementById(commentId)
+        const continuation = target && q<HTMLElement>(SELECTORS.comments.repliesContinuation, target)
+        if (continuation) nudgeIntoViewport(continuation, () => {}, 700)
         await new Promise((resolve) => window.setTimeout(resolve, 700))
         const refreshed = findCommentElementById(commentId)
         if (refreshed && qa(SELECTORS.comments.replyItem, refreshed).length > 0) break
@@ -1615,6 +1649,59 @@ registerHandlers({
       if (item) items.push({ ...item, parentId: commentId })
     }
     return { items }
+  },
+  COMMENT_POST: async ({ text: body }) => {
+    let box = q<HTMLElement>(SELECTORS.comments.commentBox)
+    if (!box) {
+      // ページ読み込み直後はプレースホルダだけが存在し、クリックして初めて
+      // 本物のytd-commentboxが生成される（返信欄と同じパターン）。
+      const trigger = q<HTMLElement>(SELECTORS.comments.commentBoxTrigger)
+      if (!trigger) return { ok: false }
+      trigger.click()
+      for (let attempt = 0; attempt < 5 && !box; attempt++) {
+        await new Promise((resolve) => window.setTimeout(resolve, 200))
+        box = q<HTMLElement>(SELECTORS.comments.commentBox)
+      }
+    }
+    if (!box) return { ok: false }
+    // 新規に投稿されたコメントは既存のコメント自動監視(watchComments/FEED_APPEND)が
+    // 拾うため、ここで結果を組み立てて返す必要はない。成否だけ返す。
+    const ok = await submitCommentBox(box, body)
+    return { ok }
+  },
+  COMMENT_REPLY: async ({ commentId, text: body }) => {
+    const thread = findCommentElementById(commentId)
+    if (!thread) return { ok: false, items: [] }
+
+    let box = q<HTMLElement>(SELECTORS.comments.replyCommentBox, thread)
+    if (!box) {
+      const trigger = q<HTMLElement>(SELECTORS.comments.replyButton, thread)
+      if (!trigger || trigger.matches(":disabled, [disabled], [aria-disabled='true']")) {
+        return { ok: false, items: [] }
+      }
+      trigger.click()
+      // 返信欄(ytd-commentbox[is-reply])が生成されるのを少し待つ
+      for (let attempt = 0; attempt < 5 && !box; attempt++) {
+        await new Promise((resolve) => window.setTimeout(resolve, 200))
+        const refreshed = findCommentElementById(commentId)
+        box = refreshed && q<HTMLElement>(SELECTORS.comments.replyCommentBox, refreshed)
+      }
+    }
+    if (!box) return { ok: false, items: [] }
+
+    const ok = await submitCommentBox(box, body)
+    if (!ok) return { ok: false, items: [] }
+
+    // 投稿の反映（DOMへの追加）を少し待ってから、最新の返信一覧を読み直して返す
+    await new Promise((resolve) => window.setTimeout(resolve, 500))
+    const parent = findCommentElementById(commentId)
+    if (!parent) return { ok: true, items: [] }
+    const items: FeedItem[] = []
+    for (const replyEl of qa(SELECTORS.comments.replyItem, parent)) {
+      const item = parseCommentThread(replyEl)
+      if (item) items.push({ ...item, parentId: commentId })
+    }
+    return { ok: true, items }
   },
   DIAGNOSE_SELECTORS: () => ({ v: DIAGNOSE_VERSION, checks: diagnoseDetail(), samples: sampleOutlines() })
 })
