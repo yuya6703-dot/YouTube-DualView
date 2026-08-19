@@ -41,7 +41,7 @@
     "typescript": "5.3.3"
   },
   "manifest": {
-    "name": "YouTube DualView (Personal)",
+    "name": "YouTube DualView",
     "description": "サブモニタからYouTubeを操作する個人用ツール",
     "permissions": [
       "storage",
