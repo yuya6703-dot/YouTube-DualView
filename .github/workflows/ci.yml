@@ -17,7 +17,7 @@ jobs:
     name: typecheck / build / audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # package.json の "packageManager" フィールドからバージョンを自動検出させる。
       # ここで version を指定すると「Multiple versions of pnpm specified」で失敗する。
