@@ -1,6 +1,6 @@
 {
   "name": "youtube-dualview",
-  "displayName": "YouTube DualView",
+  "displayName": "DualView for YouTube",
   "version": "0.1.0",
   "description": "サブモニタからYouTubeを操作する個人用ツール",
   "author": "miguel",
@@ -44,7 +44,7 @@
     "typescript": "5.3.3"
   },
   "manifest": {
-    "name": "YouTube DualView",
+    "name": "DualView for YouTube",
     "description": "サブモニタからYouTubeを操作する個人用ツール",
     "permissions": [
       "storage",

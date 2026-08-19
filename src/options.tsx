@@ -111,7 +111,7 @@ export default function Options() {
       <div className="mx-auto max-w-xl px-6 py-10">
         <header className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">YouTube DualView 設定</h1>
+            <h1 className="text-lg font-semibold tracking-tight">DualView for YouTube 設定</h1>
             <p className="mt-1 text-xs text-neutral-500">変更は自動的に保存されます</p>
           </div>
           {saved && (
