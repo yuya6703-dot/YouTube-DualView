@@ -231,6 +231,7 @@ export default function Popout() {
   // 新規コメントの投稿。投稿自体の反映は既存のコメント自動監視(FEED_APPEND)に任せる
   const [newCommentText, setNewCommentText] = useState("")
   const [newCommentPosting, setNewCommentPosting] = useState(false)
+  const [newCommentError, setNewCommentError] = useState<string | null>(null)
 
   // 前回選んだ文字サイズと、options.tsxで変更された設定を読み込む
   // 開いている間の設定ページからの変更もstorage.onChangedで即時反映する。
@@ -373,8 +374,14 @@ export default function Popout() {
   const removeNote = (id: string) => {
     if (currentVideoId === null) return
     setNotesByVideo((prev) => {
-      const existing = prev[currentVideoId] ?? []
-      return { ...prev, [currentVideoId]: existing.filter((n) => n.id !== id) }
+      const remaining = (prev[currentVideoId] ?? []).filter((n) => n.id !== id)
+      // 最後の1件を消したら動画のキー自体を落とす。空配列を残すと、
+      // メモを取って消しただけの動画がstorageに永久に溜まり続ける。
+      if (remaining.length === 0) {
+        const { [currentVideoId]: _removed, ...rest } = prev
+        return rest
+      }
+      return { ...prev, [currentVideoId]: remaining }
     })
   }
 
@@ -488,14 +495,25 @@ export default function Popout() {
     requestMoreRelated
   )
 
+  // ★ 投稿の失敗を黙って捨てない。メイン画面が未ログイン・投稿欄が無効化されている等、
+  //   CS側が ok:false を返す経路は現実に複数ある。何も出さないと「押したのに反応しない」
+  //   だけの状態になり、原因の切り分けが一切できなくなる。
   const postNewComment = async () => {
     if (tabId === null || newCommentPosting) return
     const body = newCommentText.trim()
     if (!body) return
     setNewCommentPosting(true)
+    setNewCommentError(null)
     const res = await askContent(tabId, "COMMENT_POST", { text: body })
     setNewCommentPosting(false)
-    if (isErr(res) || !res.data.ok) return
+    if (isErr(res)) {
+      setNewCommentError("メイン画面と通信できませんでした。YouTubeタブを再読み込みしてください。")
+      return
+    }
+    if (!res.data.ok) {
+      setNewCommentError("投稿できませんでした。メイン画面でログインしているか確認してください。")
+      return
+    }
     setNewCommentText("")
   }
 
@@ -688,6 +706,7 @@ export default function Popout() {
                 onSubmit={() => void postNewComment()}
                 posting={newCommentPosting}
                 disabled={tabId === null}
+                error={newCommentError}
               />
               <ul onScroll={onFeedScroll} className="min-h-0 flex-1 overflow-y-auto">
                 {feed.map((item) => (
@@ -722,18 +741,28 @@ export default function Popout() {
                 </button>
               </div>
             </div>
-            <ul onScroll={onFeedScroll} className="flex-1 overflow-y-auto rounded-lg border border-neutral-800">
-              {feed.map((item) => (
-                <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} />
-              ))}
-              <PagingTail
-                page={commentPage}
-                itemCount={feed.length}
-                label="コメント"
-                onRetry={requestMoreFeed}
-                sentinelRef={commentSentinelRef}
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-neutral-800">
+              <NewCommentComposer
+                value={newCommentText}
+                onChange={setNewCommentText}
+                onSubmit={() => void postNewComment()}
+                posting={newCommentPosting}
+                disabled={tabId === null}
+                error={newCommentError}
               />
-            </ul>
+              <ul onScroll={onFeedScroll} className="min-h-0 flex-1 overflow-y-auto">
+                {feed.map((item) => (
+                  <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} />
+                ))}
+                <PagingTail
+                  page={commentPage}
+                  itemCount={feed.length}
+                  label="コメント"
+                  onRetry={requestMoreFeed}
+                  sentinelRef={commentSentinelRef}
+                />
+              </ul>
+            </div>
           </div>
         ) : (
           <>
@@ -1035,6 +1064,7 @@ export default function Popout() {
                   onSubmit={() => void postNewComment()}
                   posting={newCommentPosting}
                   disabled={tabId === null}
+                  error={newCommentError}
                 />
               )}
 
@@ -1447,15 +1477,24 @@ function CommentRow({ item, size, tabId, isReply = false }: {
   const [replying, setReplying] = useState(false)
   const [replyText, setReplyText] = useState("")
   const [replyPosting, setReplyPosting] = useState(false)
+  const [replyError, setReplyError] = useState<string | null>(null)
 
   const postReply = async () => {
     if (tabId === null || replyPosting) return
     const body = replyText.trim()
     if (!body) return
     setReplyPosting(true)
+    setReplyError(null)
     const res = await askContent(tabId, "COMMENT_REPLY", { commentId: item.id, text: body })
     setReplyPosting(false)
-    if (isErr(res) || !res.data.ok) return
+    if (isErr(res)) {
+      setReplyError("メイン画面と通信できませんでした。YouTubeタブを再読み込みしてください。")
+      return
+    }
+    if (!res.data.ok) {
+      setReplyError("返信できませんでした。メイン画面でログインしているか確認してください。")
+      return
+    }
     setReplies(res.data.items)
     setRepliesOpen(true)
     setReplyText("")
@@ -1537,6 +1576,7 @@ function CommentRow({ item, size, tabId, isReply = false }: {
               rows={2}
               className="w-full resize-none rounded bg-neutral-800 px-2 py-1.5 text-[12px] text-neutral-200 placeholder:text-neutral-600 focus:outline-none"
             />
+            {replyError && <p className="mt-1 text-[11px] leading-snug text-red-400">{replyError}</p>}
             <div className="mt-1 flex justify-end gap-2">
               <button
                 onClick={() => {
@@ -1571,12 +1611,13 @@ function CommentRow({ item, size, tabId, isReply = false }: {
   )
 }
 
-function NewCommentComposer({ value, onChange, onSubmit, posting, disabled }: {
+function NewCommentComposer({ value, onChange, onSubmit, posting, disabled, error }: {
   value: string
   onChange: (value: string) => void
   onSubmit: () => void
   posting: boolean
   disabled: boolean
+  error: string | null
 }) {
   return (
     <div className="border-t border-neutral-800 px-4 py-2.5">
@@ -1594,6 +1635,7 @@ function NewCommentComposer({ value, onChange, onSubmit, posting, disabled }: {
         rows={value ? 2 : 1}
         className="w-full resize-none rounded bg-neutral-800 px-2.5 py-1.5 text-xs text-neutral-200 placeholder:text-neutral-600 focus:outline-none disabled:opacity-40"
       />
+      {error && <p className="mt-1 text-[11px] leading-snug text-red-400">{error}</p>}
       {value.trim() && (
         <div className="mt-1.5 flex justify-end gap-2">
           <button

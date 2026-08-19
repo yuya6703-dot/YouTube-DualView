@@ -15,7 +15,8 @@ import {
 
 const POPOUT_PATH = "tabs/popout.html"
 const DEFAULT_BOUNDS = { width: 460, height: 940, left: 100, top: 100 }
-const YT_WATCH_PATTERN = "https://www.youtube.com/*"
+// /watch に限らずYouTubeタブ全体が対象（Content Scriptの matches と揃えている）。
+const YT_TAB_PATTERN = "https://www.youtube.com/*"
 
 type Bounds = { width: number; height: number; left: number; top: number }
 
@@ -48,7 +49,7 @@ async function resolveTargetTab(): Promise<number | null> {
   const saved = await sGet<number>(SESSION_KEYS.targetTabId)
   if (saved !== null && (await isTabAlive(saved))) return saved
 
-  const tabs = await chrome.tabs.query({ url: YT_WATCH_PATTERN })
+  const tabs = await chrome.tabs.query({ url: YT_TAB_PATTERN })
   if (tabs.length === 0) {
     await sDel(SESSION_KEYS.targetTabId)
     return null
@@ -168,7 +169,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   const { autoClosePopout } = await loadSettings()
   if (!autoClosePopout) return
 
-  const remaining = await chrome.tabs.query({ url: YT_WATCH_PATTERN })
+  const remaining = await chrome.tabs.query({ url: YT_TAB_PATTERN })
   if (remaining.length > 0) return
 
   const popoutId = await sGet<number>(SESSION_KEYS.popoutWindowId)

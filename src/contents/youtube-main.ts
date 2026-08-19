@@ -783,12 +783,31 @@ async function submitCommentBox(box: Element, text_: string): Promise<boolean> {
   if (!editable) return false
 
   editable.focus()
+  // ★ execCommand("insertText") は「キャレット位置への挿入」であって置換ではない。
+  //   投稿欄に前回の失敗分やユーザーがメイン画面で打ちかけた文字が残っていると、
+  //   それに連結された別物の文章がそのまま公開投稿されてしまう。
+  //   非折りたたみの選択範囲に対する insertText は選択内容を置き換えるため、
+  //   まず中身を全選択してから挿入し、常に「入力欄の内容 === 渡した本文」を保証する。
+  const selection = window.getSelection()
+  if (selection) {
+    const range = document.createRange()
+    range.selectNodeContents(editable)
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }
   document.execCommand("insertText", false, text_)
   // execCommandが効かない環境向けの保険。反映されていなければ手動でイベントも発火する。
   if ((editable.textContent ?? "").trim().length === 0 && text_.trim().length > 0) {
     editable.textContent = text_
     editable.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "insertText", data: text_ }))
   }
+  // ★ 投稿直前の最終防衛線。全選択→挿入が何らかの理由で効かず、入力欄の中身が
+  //   渡した本文と一致しない状態のまま投稿ボタンを押すと、意図しない文章が公開される。
+  //   一致しない場合は投稿せず失敗として返し、Popout側にエラーを出させる。
+  //   ※ contenteditableでは改行が <br>/<div> として表現され textContent からは消えるため、
+  //     空白類をすべて無視して比較する。余計な文字の混入だけを検出できれば目的は足りる。
+  const squash = (s: string) => s.replace(/\s+/gu, "")
+  if (squash(editable.textContent ?? "") !== squash(text_)) return false
 
   // 投稿ボタンの活性化はYouTube側の内部状態更新を経るため、反映を少し待つ
   await new Promise((resolve) => window.setTimeout(resolve, 300))
@@ -1390,12 +1409,14 @@ function postToPort(port: chrome.runtime.Port, ev: StreamEvent): boolean {
 }
 
 /**
- * 新規・再接続Portへ現在状態を直接再水和する。
- * コメントは動画世代が確定済みの安全な要素だけをsnapshotとして送る。
+ * 現在の動画のコメント一覧スナップショットを返す。
+ *
+ * DOM上に残っている安全な行をキャッシュへ統合したうえで、過去に取得済みの分も含めて返す。
+ * Port再接続時の再水和と、単発の DOM_FETCH_FEED の両方が同じ結果を返すよう共通化している。
+ * ★ markCommentSeen() の副作用込みで既存挙動を維持する。ここで配り終えた行を
+ *   後から FEED_APPEND の「新着」として二重に流さないため。
  */
-function rehydratePort(port: chrome.runtime.Port) {
-  const onWatchPage = location.pathname === "/watch" && getVideoId() !== null
-  const relatedItems = onWatchPage ? fetchRelated() : []
+function collectCommentItems(): FeedItem[] {
   const currentVideoId = getVideoId()
   const container = commentContainerEl
   const cacheMatchesVideo = Boolean(currentVideoId && lastVideoId === currentVideoId)
@@ -1407,7 +1428,6 @@ function rehydratePort(port: chrome.runtime.Port) {
   )
 
   if (canHydrateComments && container) {
-    // 現在DOMに残っている安全な行をキャッシュへ統合してから、過去に取得済みの行も含めて返す。
     const threads = qa(SELECTORS.comments.thread, container)
       .filter((el) => belongsToCurrentVideo(el) && !isUnsafeComment(el))
     for (const el of threads) {
@@ -1418,7 +1438,17 @@ function rehydratePort(port: chrome.runtime.Port) {
     }
   }
   // コンテナが一時的に未生成でも、同一動画で以前取得済みの行は失わず返す。
-  const commentItems = cacheMatchesVideo ? Array.from(commentItemCache.values()) : []
+  return cacheMatchesVideo ? Array.from(commentItemCache.values()) : []
+}
+
+/**
+ * 新規・再接続Portへ現在状態を直接再水和する。
+ * コメントは動画世代が確定済みの安全な要素だけをsnapshotとして送る。
+ */
+function rehydratePort(port: chrome.runtime.Port) {
+  const onWatchPage = location.pathname === "/watch" && getVideoId() !== null
+  const relatedItems = onWatchPage ? fetchRelated() : []
+  const commentItems = collectCommentItems()
 
   if (!postToPort(port, { type: "RELATED", payload: relatedItems })) return
 
@@ -1577,7 +1607,20 @@ function seekAfterNavigation(videoId: string, seconds: number, generation: numbe
 
 registerHandlers({
   PLAYER_GET_STATUS: () => buildStatus(),
+  // 本線はPort経由の StreamCommand "COMMAND"。こちらはPortが切れている間でも
+  // 単発で操作できるようにするフォールバック経路（契約・仕様書と実装を一致させる）。
+  PLAYER_COMMAND: (cmd) => {
+    applyCommand(cmd)
+    return buildStatus()
+  },
   DOM_FETCH_RELATED: () => fetchRelated(),
+  // 本線はPort経由の FEED_APPEND ストリーム。こちらは単発取得のフォールバック。
+  // ライブチャットは対象外(D-20)のため kind は常に "comment"。
+  DOM_FETCH_FEED: ({ limit }) => {
+    const items = collectCommentItems()
+    const capped = typeof limit === "number" && limit > 0 ? items.slice(0, limit) : items
+    return { kind: "comment" as const, items: capped }
+  },
   NAVIGATE_SEARCH: ({ query }) => {
     navigationCommandGeneration++
     const url = new URL("/results", location.origin)
