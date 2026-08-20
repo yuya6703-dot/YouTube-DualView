@@ -192,7 +192,7 @@ function onNavigated() {
       ? navigationStartCommentSnapshot.elements
       // yt-navigate-startを取りこぼした場合は、permalinkの動画IDが現URLと異なる要素だけを旧DOMとする。
       : commentContainerEl && document.contains(commentContainerEl)
-        ? qa(SELECTORS.comments.thread, commentContainerEl)
+        ? qaTopLevelThreads(commentContainerEl)
             .filter((el) => !belongsToCurrentVideo(el))
         : []
   navigationStartCommentSnapshot = null
@@ -739,7 +739,7 @@ function capturePreNavigationComments() {
     : q(SELECTORS.comments.section)
   navigationStartCommentSnapshot = {
     videoId: lastVideoId,
-    elements: container ? qa(SELECTORS.comments.thread, container) : []
+    elements: container ? qaTopLevelThreads(container) : []
   }
 }
 
@@ -768,6 +768,24 @@ function getStableCommentId(el: Element): string | null {
     hash = Math.imul(hash, 16777619)
   }
   return `fallback:${(hash >>> 0).toString(36)}`
+}
+
+/**
+ * トップレベルのコメントスレッドだけを返す。
+ *
+ * ★ `ytd-comment-thread-renderer` は、通常コメントだけでなく**返信欄の中の返信**にも
+ *   同じ種類の要素として使われている（YouTubeの新しいスレッド表示UIで、返信自身が
+ *   さらに返信を持てるようにするための入れ子構造）。`SELECTORS.comments.thread`は
+ *   種類でしか絞り込んでおらず位置を見ていないため、素朴に`qa()`するだけだと
+ *   返信欄の中の要素まで「新しい独立したコメント」として拾ってしまい、
+ *   返信が通常コメントとして表示される不具合になる（2026-08-20 実機で確認、
+ *   27件中7件が`#replies`/`#expanded-threads`の中に入れ子だった）。
+ *   `#replies`/`#expanded-threads`の子孫は必ず除外する。
+ */
+function qaTopLevelThreads(container: ParentNode): Element[] {
+  return qa(SELECTORS.comments.thread, container).filter(
+    (el) => !el.closest("#replies") && !el.closest("#expanded-threads")
+  )
 }
 
 /** コメントのpermalinkが動画IDを持つ場合、SPA遷移中の旧動画コメントを確実に除外する。 */
@@ -816,7 +834,7 @@ function findCommentElementById(id: string): Element | null {
     : q(SELECTORS.comments.section)
   if (!container) return null
 
-  for (const el of qa(SELECTORS.comments.thread, container)) {
+  for (const el of qaTopLevelThreads(container)) {
     if (getStableCommentId(el) === id) return el
   }
   for (const el of qa(SELECTORS.comments.replyItem, container)) {
@@ -1042,7 +1060,7 @@ function flushCommentEmit() {
   commentDebounceId = null
   const container = commentContainerEl
   const threads = container && document.contains(container)
-    ? qa(SELECTORS.comments.thread, container)
+    ? qaTopLevelThreads(container)
     : []
 
   // 旧要素と新要素が同時に存在しても、新要素だけは直ちに配信できる。
@@ -1315,7 +1333,7 @@ function currentCommentThreads(): Element[] {
     ? commentContainerEl
     : q(SELECTORS.comments.section)
   if (!container) return []
-  return qa(SELECTORS.comments.thread, container)
+  return qaTopLevelThreads(container)
     .filter((el) => belongsToCurrentVideo(el) && !isUnsafeComment(el))
 }
 
@@ -1486,7 +1504,7 @@ function watchComments(
       markCommentSeen(el)
       markCommentUnsafe(el)
     }
-    const hasUnsafeThreads = qa(SELECTORS.comments.thread, container)
+    const hasUnsafeThreads = qaTopLevelThreads(container)
       .some(isUnsafeComment)
     awaitingFreshComments = pendingFreshCommentWait && hasUnsafeThreads
     pendingFreshCommentWait = false
@@ -1622,7 +1640,7 @@ function collectCommentItems(): FeedItem[] {
   )
 
   if (canHydrateComments && container) {
-    const threads = qa(SELECTORS.comments.thread, container)
+    const threads = qaTopLevelThreads(container)
       .filter((el) => belongsToCurrentVideo(el) && !isUnsafeComment(el))
     for (const el of threads) {
       markCommentSeen(el)
