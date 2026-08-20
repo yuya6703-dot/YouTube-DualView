@@ -106,8 +106,9 @@ function resetVideoCaches() {
   commentItemCache = new Map()
   relatedItemCache = new Map()
   relatedPaginationEstablished = false
-  avatarNudgeQueue = []
   pendingAvatarIds = new Set()
+  avatarNudgedIds = new Set()
+  clearAvatarNudgeQueue()
 }
 
 function getPageState(kind: PageKind): PageState {
@@ -1035,13 +1036,18 @@ function parseCommentThread(el: Element): FeedItem | null {
  */
 const AVATAR_BACKFILL_DELAYS_MS = [600, 1800, 4000, 8000] as const
 const AVATAR_FILL_DEBOUNCE_MS = 200
+/** 他のnudge利用箇所（continuation等）と同じ滞在時間。短くするとIO評価に載らないことがある。 */
+const AVATAR_NUDGE_DWELL_MS = 700
 
 /** アイコンが空のまま配信され、まだ埋め直せていないコメントのid。 */
 let pendingAvatarIds = new Set<string>()
 let avatarObserver: MutationObserver | null = null
 let avatarFillDebounceId: number | null = null
 let avatarNudgeQueue: string[] = []
+let avatarNudgeQueuedIds = new Set<string>()
+let avatarNudgedIds = new Set<string>()
 let avatarNudgeRunning = false
+let avatarNudgeGeneration = 0
 
 /**
  * 遅延読み込みのIntersectionObserverが実際に張られている要素を返す。
@@ -1052,31 +1058,55 @@ function resolveAvatarNudgeTarget(img: HTMLImageElement): HTMLElement {
   return host ?? img
 }
 
-/** 保留中のコメントを現在のDOMから読み直し、埋まっていた分だけ送り直す。残った件数を返す。 */
+/**
+ * 保留中のコメントを現在のDOMから読み直し、埋まっていた分だけ送り直す。残った件数を返す。
+ *
+ * ★ id毎に`findCommentElementById()`を呼ぶと、その中で全スレッドを走査しながら
+ *   `getStableCommentId()`（URL解析＋テキスト抽出＋ハッシュ）を回すため
+ *   O(保留件数 × スレッド数)の重い処理になる。これは**動画プレイヤーと同じタブ**で走る
+ *   （D-09/D-10のとおり、このプロジェクトはメインタブの負荷に敏感）。
+ *   スクロール中は`src`の変化が連続して起きるので、走査は1回で済ませる。
+ */
 function flushPendingAvatars(): number {
   if (pendingAvatarIds.size === 0) return 0
   if (ports.size === 0) return pendingAvatarIds.size
 
-  const filled: FeedItem[] = []
+  // DOMを触る前に、キャッシュだけで決着が付くidを外す（Map参照のみで安価）。
   for (const id of [...pendingAvatarIds]) {
     const cached = commentItemCache.get(id)
+    if (!cached || cached.avatarUrl) pendingAvatarIds.delete(id) // 破棄済み or 既に埋まった
+  }
+  if (pendingAvatarIds.size === 0) return 0
+
+  const container = commentContainerEl && document.contains(commentContainerEl)
+    ? commentContainerEl
+    : q(SELECTORS.comments.section)
+  if (!container) return pendingAvatarIds.size
+
+  const filled: FeedItem[] = []
+  const readAvatar = (el: Element) => {
+    if (pendingAvatarIds.size === 0) return
+    const id = getStableCommentId(el)
+    if (!id || !pendingAvatarIds.has(id)) return
+    const cached = commentItemCache.get(id)
     if (!cached) {
-      pendingAvatarIds.delete(id) // 動画切り替え等でキャッシュから消えた
-      continue
-    }
-    if (cached.avatarUrl) {
       pendingAvatarIds.delete(id)
-      continue
+      return
     }
-    // 要素が差し替わっていても現在のDOMから引き直す
-    const el = findCommentElementById(id)
-    const avatarUrl = el ? q<HTMLImageElement>(SELECTORS.comments.avatar, el)?.src ?? "" : ""
-    if (!avatarUrl) continue
+    const avatarUrl = q<HTMLImageElement>(SELECTORS.comments.avatar, el)?.src ?? ""
+    if (!avatarUrl) return
     const updated = { ...cached, avatarUrl }
     commentItemCache.set(id, updated)
     pendingAvatarIds.delete(id)
     filled.push(updated)
   }
+  // 要素が差し替わっていても、現在のDOMを1回走査して突き合わせる。
+  for (const el of qaTopLevelThreads(container)) readAvatar(el)
+  // 残りが無ければ返信側の走査（querySelectorAll＋id計算）ごと省く。
+  if (pendingAvatarIds.size > 0) {
+    for (const el of qa(SELECTORS.comments.replyItem, container)) readAvatar(el)
+  }
+
   if (filled.length > 0) {
     emit({ type: "FEED_APPEND", payload: { kind: "comment", items: filled } })
   }
@@ -1104,43 +1134,70 @@ function watchAvatarFills(container: Element) {
   })
 }
 
-/** タイムアウトでも埋まらなかったアイコンを、1件ずつ順番にnudgeIntoViewport()へ回す。 */
+/**
+ * タイムアウトでも埋まらなかったアイコンを、1件ずつ順番にnudgeIntoViewport()へ回す。
+ *
+ * ★ 同じidを何度もnudgeしない（`avatarNudgedIds`）。新しいバッチが届くたびに
+ *   「まだ空の全件」を積み直す作りなので、何をしても埋まらないアイコンが1件でもあると
+ *   ページングのたびに延々とnudgeし続けてしまう。1回試して駄目なら、以後は
+ *   `watchAvatarFills()`の購読に委ねる（後から埋まればそちらが拾う）。
+ */
 function enqueueAvatarNudge(ids: string[]) {
   for (const id of ids) {
-    if (!avatarNudgeQueue.includes(id)) avatarNudgeQueue.push(id)
+    if (avatarNudgedIds.has(id) || avatarNudgeQueuedIds.has(id)) continue
+    avatarNudgeQueue.push(id)
+    avatarNudgeQueuedIds.add(id)
   }
   if (!avatarNudgeRunning) runNextAvatarNudge()
 }
 
-function runNextAvatarNudge() {
-  const id = avatarNudgeQueue.shift()
-  if (!id) {
-    avatarNudgeRunning = false
-    return
-  }
-  avatarNudgeRunning = true
+function clearAvatarNudgeQueue() {
+  avatarNudgeQueue = []
+  avatarNudgeQueuedIds = new Set()
+  avatarNudgeRunning = false
+  avatarNudgeGeneration += 1 // 実行中のnudgeのコールバックを無効化する
+}
 
-  if (ports.size === 0) {
-    avatarNudgeQueue = []
-    avatarNudgeRunning = false
-    return
+/**
+ * ★ スキップ時は再帰ではなくループで進める（保留が数百件でもスタックを積まない）。
+ *
+ * ★ nudgeの連鎖は常に1本だけにする。`nudgeIntoViewport()`は対象の祖先の
+ *   `content-visibility`/`overflow`/`contain`を一時解除して元へ戻すが、その「原状」は
+ *   呼び出し時点のスナップショット。連鎖が2本並走すると、後発が先発の**一時styleを
+ *   原状として記録**してしまい、復元後もメイン画面にstyleが残る
+ *   （`nudgeIntoViewport()`内の同一要素ガードは、祖先の取り合いまでは面倒を見ない）。
+ *   中断は`avatarNudgeGeneration`で表現し、古い世代のコールバックは何もせず終わる。
+ */
+function runNextAvatarNudge() {
+  const generation = avatarNudgeGeneration
+  for (;;) {
+    const id = avatarNudgeQueue.shift()
+    if (id === undefined) {
+      avatarNudgeRunning = false
+      return
+    }
+    avatarNudgeQueuedIds.delete(id)
+    avatarNudgeRunning = true
+
+    if (ports.size === 0) {
+      clearAvatarNudgeQueue()
+      return
+    }
+    const cached = commentItemCache.get(id)
+    if (!cached || cached.avatarUrl) continue // 既に埋まっている・動画切り替えで破棄済み
+    const el = findCommentElementById(id)
+    const img = el && q<HTMLImageElement>(SELECTORS.comments.avatar, el)
+    if (!img) continue
+
+    avatarNudgedIds.add(id)
+    // 埋まった結果は watchAvatarFills() が拾うが、監視の届かない経路でも取りこぼさないよう自分でも読む。
+    nudgeIntoViewport(resolveAvatarNudgeTarget(img), () => {
+      if (generation !== avatarNudgeGeneration) return // 中断済み（動画切り替え・切断など）
+      flushPendingAvatars()
+      runNextAvatarNudge()
+    }, AVATAR_NUDGE_DWELL_MS)
+    return // 次の1件はコールバックから進める
   }
-  const cached = commentItemCache.get(id)
-  if (!cached || cached.avatarUrl) {
-    runNextAvatarNudge() // 既に埋まっている・動画切り替えで破棄済みならスキップ
-    return
-  }
-  const el = findCommentElementById(id)
-  const img = el && q<HTMLImageElement>(SELECTORS.comments.avatar, el)
-  if (!img) {
-    runNextAvatarNudge()
-    return
-  }
-  // 埋まった結果は watchAvatarFills() が拾うが、監視の届かない経路でも取りこぼさないよう自分でも読む。
-  nudgeIntoViewport(resolveAvatarNudgeTarget(img), () => {
-    flushPendingAvatars()
-    runNextAvatarNudge()
-  }, 700)
 }
 
 function scheduleAvatarBackfill(threads: Element[]) {
@@ -1665,6 +1722,8 @@ function stopWatchPageObservers() {
     window.clearTimeout(avatarFillDebounceId)
     avatarFillDebounceId = null
   }
+  // detachされたDOMへnudgeを撃ち続けない。保留id自体は動画が同じなら再取得で活きるので消さない。
+  clearAvatarNudgeQueue()
   pendingCommentNavigation = false
   pendingFreshCommentWait = false
   pendingUnsafeCommentEls = []
@@ -1838,6 +1897,16 @@ chrome.runtime.onConnect.addListener((port) => {
   bindVideo()
   pushStatus() // 接続直後に必ず1回投げる（初期表示の空白を防ぐ）
   rehydratePort(port)
+
+  // ★ Port不在中はアイコンの`src`変化を監視できていないため、その間に埋まった分を
+  //   取りこぼしたままになる（再接続時、既存コメントは全て既読なので
+  //   `scheduleAvatarBackfill()`が走らず、待っていても永久に埋まらない）。
+  //   rehydrateの**後**に流すこと。先に流すと、rehydrateが送る一覧より先に
+  //   個別のFEED_APPENDが着いて、サブ画面の並び順が入れ替わる。
+  if (wasInactive && pendingAvatarIds.size > 0) {
+    avatarNudgedIds = new Set() // 再接続は仕切り直し。1回の失敗で恒久的に諦めない
+    if (flushPendingAvatars() > 0) enqueueAvatarNudge([...pendingAvatarIds])
+  }
 
   port.onMessage.addListener((msg: StreamCommand) => {
     switch (msg.type) {
