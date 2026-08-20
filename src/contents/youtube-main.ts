@@ -106,6 +106,8 @@ function resetVideoCaches() {
   commentItemCache = new Map()
   relatedItemCache = new Map()
   relatedPaginationEstablished = false
+  avatarNudgeQueue = []
+  pendingAvatarIds = new Set()
 }
 
 function getPageState(kind: PageKind): PageState {
@@ -1006,37 +1008,158 @@ function parseCommentThread(el: Element): FeedItem | null {
  *   そのまま配信するとサブ画面にアイコンが出ないまま固定される
  *   （2026-08-19 実機で、20件中1件しかアイコンが出ない状態として報告）。
  *   DOMを一切変更しない純粋な読み直しなので、プレイヤーへの副作用はない。
+ *
+ * ★ 2026-08-20: 保持していた要素参照(`el`)ではなく、毎回`findCommentElementById()`で
+ *   idから引き直すように変更。コメント欄が更新中（並び替え変更・ページング等）だと、
+ *   最初に見つけた要素がYouTube側で差し替えられ`document.contains(el)`がfalseになり、
+ *   以後そのコメントは`isSeenComment()`により再解析対象からも外れるため、
+ *   アイコンが永久に空のまま固定されてしまう（「コメント欄更新中に時々アイコンが
+ *   出ない」との報告）。idから引き直せば差し替え後の新要素を素直に拾える。
+ *
+ * ★ 2026-08-21: 上記のタイムアウト方式は「解析タイミングが早すぎるだけ」という前提
+ *   だったが、実機の生DOMを調べたところ前提が誤りだったと判明。avatar画像は
+ *   `<yt-img-shadow>`配下の`<img id="img">`で、`src`はおろか`data-src`すら持たず、
+ *   **YouTube自身のIntersectionObserverがビューポート内に入るまで一切注入しない**
+ *   正真正銘の遅延読み込みだった（実機で40件中28〜32件が空、何秒待ってもゼロのまま）。
+ *
+ * ★ 2026-08-21(2): タイムアウトで殴る方式そのものを捨て、**属性変化の購読**へ切り替えた。
+ *   決定打になった観測は「メインタブをスクロールした後は41件すべて`src`が埋まっているのに、
+ *   サブ画面は18/20が欠けたまま」。データは存在するのに、それが埋まった瞬間を誰も見て
+ *   いなかったということ。0.6〜8秒の窓を過ぎてから埋まった分は、旧方式では永久に取りこぼす。
+ *   `MutationObserver`は`attributeFilter:["src"]`で属性変化も監視できるので、
+ *   **いつ埋まろうと確実に拾える**（`watchAvatarFills()`）。純粋な監視なのでDOMは触らない。
+ *   そのうえで、ユーザーがメインタブを一切触らない通常運用のために能動トリガーも残すが、
+ *   nudge対象は内側の`<img>`ではなく**ホスト要素**(`yt-img-shadow`/`#author-thumbnail`)にした。
+ *   遅延読み込みのIntersectionObserverが張られているのはホスト側であり、内側の`<img>`だけを
+ *   `position:fixed`で動かしてもホストは画面外のままなので、v43は空振りしていたと考えられる。
  */
-const AVATAR_BACKFILL_DELAYS_MS = [600, 1800, 4000] as const
+const AVATAR_BACKFILL_DELAYS_MS = [600, 1800, 4000, 8000] as const
+const AVATAR_FILL_DEBOUNCE_MS = 200
+
+/** アイコンが空のまま配信され、まだ埋め直せていないコメントのid。 */
+let pendingAvatarIds = new Set<string>()
+let avatarObserver: MutationObserver | null = null
+let avatarFillDebounceId: number | null = null
+let avatarNudgeQueue: string[] = []
+let avatarNudgeRunning = false
+
+/**
+ * 遅延読み込みのIntersectionObserverが実際に張られている要素を返す。
+ * 内側の`<img>`を動かしてもホストは画面外のままなので、必ずホスト側を対象にする。
+ */
+function resolveAvatarNudgeTarget(img: HTMLImageElement): HTMLElement {
+  const host = img.closest<HTMLElement>("yt-img-shadow") ?? img.closest<HTMLElement>("#author-thumbnail")
+  return host ?? img
+}
+
+/** 保留中のコメントを現在のDOMから読み直し、埋まっていた分だけ送り直す。残った件数を返す。 */
+function flushPendingAvatars(): number {
+  if (pendingAvatarIds.size === 0) return 0
+  if (ports.size === 0) return pendingAvatarIds.size
+
+  const filled: FeedItem[] = []
+  for (const id of [...pendingAvatarIds]) {
+    const cached = commentItemCache.get(id)
+    if (!cached) {
+      pendingAvatarIds.delete(id) // 動画切り替え等でキャッシュから消えた
+      continue
+    }
+    if (cached.avatarUrl) {
+      pendingAvatarIds.delete(id)
+      continue
+    }
+    // 要素が差し替わっていても現在のDOMから引き直す
+    const el = findCommentElementById(id)
+    const avatarUrl = el ? q<HTMLImageElement>(SELECTORS.comments.avatar, el)?.src ?? "" : ""
+    if (!avatarUrl) continue
+    const updated = { ...cached, avatarUrl }
+    commentItemCache.set(id, updated)
+    pendingAvatarIds.delete(id)
+    filled.push(updated)
+  }
+  if (filled.length > 0) {
+    emit({ type: "FEED_APPEND", payload: { kind: "comment", items: filled } })
+  }
+  return pendingAvatarIds.size
+}
+
+/**
+ * コメント欄の`src`属性が埋まる瞬間を購読する。
+ * YouTubeがいつ（ユーザーのスクロール・nudge・内部都合のいずれで）埋めても取りこぼさない。
+ */
+function watchAvatarFills(container: Element) {
+  avatarObserver?.disconnect()
+  avatarObserver = new MutationObserver(() => {
+    if (pendingAvatarIds.size === 0) return
+    if (avatarFillDebounceId !== null) window.clearTimeout(avatarFillDebounceId)
+    avatarFillDebounceId = window.setTimeout(() => {
+      avatarFillDebounceId = null
+      flushPendingAvatars()
+    }, AVATAR_FILL_DEBOUNCE_MS)
+  })
+  avatarObserver.observe(container, {
+    attributes: true,
+    attributeFilter: ["src"],
+    subtree: true
+  })
+}
+
+/** タイムアウトでも埋まらなかったアイコンを、1件ずつ順番にnudgeIntoViewport()へ回す。 */
+function enqueueAvatarNudge(ids: string[]) {
+  for (const id of ids) {
+    if (!avatarNudgeQueue.includes(id)) avatarNudgeQueue.push(id)
+  }
+  if (!avatarNudgeRunning) runNextAvatarNudge()
+}
+
+function runNextAvatarNudge() {
+  const id = avatarNudgeQueue.shift()
+  if (!id) {
+    avatarNudgeRunning = false
+    return
+  }
+  avatarNudgeRunning = true
+
+  if (ports.size === 0) {
+    avatarNudgeQueue = []
+    avatarNudgeRunning = false
+    return
+  }
+  const cached = commentItemCache.get(id)
+  if (!cached || cached.avatarUrl) {
+    runNextAvatarNudge() // 既に埋まっている・動画切り替えで破棄済みならスキップ
+    return
+  }
+  const el = findCommentElementById(id)
+  const img = el && q<HTMLImageElement>(SELECTORS.comments.avatar, el)
+  if (!img) {
+    runNextAvatarNudge()
+    return
+  }
+  // 埋まった結果は watchAvatarFills() が拾うが、監視の届かない経路でも取りこぼさないよう自分でも読む。
+  nudgeIntoViewport(resolveAvatarNudgeTarget(img), () => {
+    flushPendingAvatars()
+    runNextAvatarNudge()
+  }, 700)
+}
 
 function scheduleAvatarBackfill(threads: Element[]) {
-  const pending = threads.filter((el) => {
-    const cached = commentItemCache.get(getStableCommentId(el) ?? "")
-    return cached !== undefined && !cached.avatarUrl
-  })
-  if (pending.length === 0) return
-
-  for (const delay of AVATAR_BACKFILL_DELAYS_MS) {
-    window.setTimeout(() => {
-      if (ports.size === 0) return
-      const filled: FeedItem[] = []
-      for (const el of pending) {
-        if (!document.contains(el)) continue
-        const id = getStableCommentId(el)
-        if (!id) continue
-        const cached = commentItemCache.get(id)
-        if (!cached || cached.avatarUrl) continue // 既に埋まっていれば何もしない
-        const avatarUrl = q<HTMLImageElement>(SELECTORS.comments.avatar, el)?.src ?? ""
-        if (!avatarUrl) continue
-        const updated = { ...cached, avatarUrl }
-        commentItemCache.set(id, updated)
-        filled.push(updated)
-      }
-      if (filled.length > 0) {
-        emit({ type: "FEED_APPEND", payload: { kind: "comment", items: filled } })
-      }
-    }, delay)
+  for (const el of threads) {
+    const id = getStableCommentId(el)
+    if (!id) continue
+    const cached = commentItemCache.get(id)
+    if (cached !== undefined && !cached.avatarUrl) pendingAvatarIds.add(id)
   }
+  if (pendingAvatarIds.size === 0) return
+
+  AVATAR_BACKFILL_DELAYS_MS.forEach((delay, index) => {
+    const isLast = index === AVATAR_BACKFILL_DELAYS_MS.length - 1
+    window.setTimeout(() => {
+      const remaining = flushPendingAvatars()
+      // 待つだけでは埋まらないと確定した分だけ、能動的に読み込ませにいく。
+      if (isLast && remaining > 0) enqueueAvatarNudge([...pendingAvatarIds])
+    }, delay)
+  })
 }
 
 function emitUnseenCommentThreads(threads: Element[]) {
@@ -1514,6 +1637,7 @@ function watchComments(
 
   commentObserver = new MutationObserver(scheduleCommentEmit)
   commentObserver.observe(container, { childList: true, subtree: true })
+  watchAvatarFills(container) // アイコンの`src`が後から埋まる瞬間を取りこぼさない
   scheduleCommentEmit() // 遷移時点で既に読み込み済みのコメントも拾う
   loadMoreComments()
 }
@@ -1534,6 +1658,12 @@ function stopWatchPageObservers() {
   if (commentDebounceId !== null) {
     window.clearTimeout(commentDebounceId)
     commentDebounceId = null
+  }
+  avatarObserver?.disconnect()
+  avatarObserver = null
+  if (avatarFillDebounceId !== null) {
+    window.clearTimeout(avatarFillDebounceId)
+    avatarFillDebounceId = null
   }
   pendingCommentNavigation = false
   pendingFreshCommentWait = false
