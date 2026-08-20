@@ -18,6 +18,8 @@ export interface Settings {
   autoOpenPopout: boolean // YouTubeの動画ページを開いたら自動でサブ画面を開く
   autoClosePopout: boolean // 対象のYouTubeタブが全部閉じられたらサブ画面も閉じる
   language: "ja" | "en"   // 拡張機能自体のUI言語（YouTube側の表示言語とは独立）
+  deeplApiKey: string      // DeepL API（無料枠）のキー。空文字なら翻訳機能は無効
+  translateTargetLang: string // コメント翻訳の翻訳先言語（DeepLの言語コード）
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -27,7 +29,9 @@ export const DEFAULT_SETTINGS: Settings = {
   feedMaxRows: 300,
   autoOpenPopout: true,
   autoClosePopout: true,
-  language: "ja"
+  language: "ja",
+  deeplApiKey: "",
+  translateTargetLang: "JA"
 }
 
 export interface QueueItem {

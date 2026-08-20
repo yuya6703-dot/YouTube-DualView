@@ -194,10 +194,29 @@ Required to control the player, read the related-video list and comments, and
 post comments on YouTube video pages. No other site is accessed.
 ```
 
+### `host_permissions: https://api-free.deepl.com/*`
+
+```
+コメントの手動翻訳機能（設定画面でDeepL APIキーを登録した場合のみ有効）で
+使用します。ユーザーがコメントごとに「翻訳」ボタンを押した時だけ、その
+コメントの本文をDeepLの翻訳APIへ送信します。自動送信・一括送信は行いません。
+APIキーを設定していない場合、この権限を使う通信は一切発生しません。
+```
+
+```
+Used by the optional comment translation feature (only active once a DeepL
+API key is set on the settings page). Sends a comment's text to DeepL's
+translation API only when the user presses "Translate" on that specific
+comment. No automatic or bulk sending occurs. With no API key configured,
+no traffic uses this permission at all.
+```
+
 ### リモートコードの使用
 
 ```
 使用していません。すべてのコードは拡張機能のパッケージに同梱されています。
+翻訳機能で送信するのはコメントのテキストのみで、コードやスクリプトの
+ダウンロード・実行は行いません。
 ```
 
 ---
@@ -209,12 +228,17 @@ Chrome Web Storeの必須項目。以下のとおり申告する。
 - 収集するデータの種類: **すべて「収集しない」**
   （個人情報、健康情報、金融情報、認証情報、個人的な連絡先、位置情報、
   ユーザーアクティビティ、ウェブ閲覧履歴 — いずれもチェックしない）
+
+  ★ 翻訳機能で送信するコメント本文は「ユーザーが個別に選んだ操作の結果として、
+  第三者の翻訳サービスへ都度送るデータ」であり、Chrome Web Storeが言う
+  「収集（collect）」＝開発者側が集める・保持するデータには該当しない
+  （開発者はこの通信を一切経由・記録しない）。この整理で「収集しない」の
+  申告と矛盾しないが、**審査時に指摘された場合は、この翻訳機能の存在と
+  動作条件を追加で説明できるようにしておくこと**
 - 以下の3つの宣言にすべてチェックを入れる:
   - 承認された用途以外にデータを使用または転送していない
   - 第三者に販売していない
   - 信用調査や融資目的で使用または転送していない
-
-★ この拡張機能は実際に外部通信コードを一切持たないため、上記の申告は事実である。
 
 ---
 

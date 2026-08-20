@@ -38,6 +38,7 @@ import {
   type Settings,
   type TimestampNote
 } from "~lib/messaging"
+import { translateText } from "~lib/deepl"
 import { getDictionary, type Dictionary } from "~lib/i18n"
 import { DIAGNOSE_VERSION } from "~lib/selectors"
 import { usePlayerPort, useSmoothTime, type ConnState } from "~lib/usePlayerPort"
@@ -723,7 +724,7 @@ export default function Popout() {
               </div>
               <ul onScroll={onFeedScroll} className="min-h-0 flex-1 overflow-y-auto">
                 {feed.map((item) => (
-                  <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} />
+                  <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} settings={settings} />
                 ))}
                 <PagingTail
                   page={commentPage}
@@ -767,7 +768,7 @@ export default function Popout() {
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-neutral-800">
               <ul onScroll={onFeedScroll} className="min-h-0 flex-1 overflow-y-auto">
                 {feed.map((item) => (
-                  <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} />
+                  <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} settings={settings} />
                 ))}
                 <PagingTail
                   page={commentPage}
@@ -1088,7 +1089,7 @@ export default function Popout() {
               {commentsOpen && (
                 <ul onScroll={onFeedScroll} className="max-h-72 overflow-y-auto border-t border-neutral-800">
                   {feed.map((item) => (
-                    <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} />
+                    <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} settings={settings} />
                   ))}
                   <PagingTail
                     page={commentPage}
@@ -1450,10 +1451,43 @@ function NoteRow({ note, onJump, onRemove, t }: {
 /** 件数を短く表示する。1000未満はそのまま、以上は"1.2万"のような概算にはせず単純にkカンマ区切り */
 const fmtCount = (n: number) => (n >= 10000 ? `${(n / 10000).toFixed(1)}万` : n.toLocaleString())
 
-function CommentRow({ item, size, tabId, t, isReply = false }: {
-  item: FeedItem; size: CommentFontSize; tabId: number | null; t: Dictionary; isReply?: boolean
+function CommentRow({ item, size, tabId, t, settings, isReply = false }: {
+  item: FeedItem; size: CommentFontSize; tabId: number | null; t: Dictionary
+  settings: Settings; isReply?: boolean
 }) {
   const cls = COMMENT_SIZE_CLASSES[size]
+
+  // コメントの手動翻訳（DeepL）。押した時だけ送信し、結果はこの行の中だけで保持する
+  // （タブを開き直す・コメント一覧を作り直すと消える。永続化は不要な一時表示のため）。
+  const [translated, setTranslated] = useState<{ text: string; sourceLang: string } | null>(null)
+  const [translating, setTranslating] = useState(false)
+  const [translateError, setTranslateError] = useState<string | null>(null)
+
+  const translateErrorMessage = (code: string): string => {
+    if (code === "NO_API_KEY") return t.translateErrNoKey
+    if (code === "INVALID_KEY") return t.translateErrInvalidKey
+    if (code === "QUOTA_EXCEEDED") return t.translateErrQuota
+    if (code === "NETWORK_ERROR") return t.translateErrNetwork
+    return t.translateErrGeneric
+  }
+
+  const toggleTranslate = async () => {
+    if (translated) {
+      setTranslated(null)
+      setTranslateError(null)
+      return
+    }
+    if (translating) return
+    setTranslating(true)
+    setTranslateError(null)
+    const res = await translateText(settings.deeplApiKey, item.text, settings.translateTargetLang)
+    setTranslating(false)
+    if (!res.ok) {
+      setTranslateError(translateErrorMessage(res.error))
+      return
+    }
+    setTranslated({ text: res.data.text, sourceLang: res.data.detectedSourceLang })
+  }
 
   // いいね: 初期値はコメント取得時点のDOMスナップショット。押した後はCSからの
   // 読み戻し値を正とする（楽観的更新でメインと状態がズレるのを避けるため）
@@ -1558,6 +1592,17 @@ function CommentRow({ item, size, tabId, t, isReply = false }: {
         <p className={`mt-0.5 whitespace-pre-wrap break-words leading-snug text-neutral-300 ${cls.body}`}>
           <CommentBody item={item} tabId={tabId} />
         </p>
+        {translated && (
+          <div className="mt-1 rounded bg-neutral-950/60 px-2 py-1.5">
+            <p className={`whitespace-pre-wrap break-words leading-snug text-neutral-200 ${cls.body}`}>
+              {translated.text}
+            </p>
+            <p className="mt-0.5 text-[10px] text-neutral-600">{t.translatedBy(translated.sourceLang)}</p>
+          </div>
+        )}
+        {translateError && (
+          <p className="mt-1 text-[11px] leading-snug text-red-400">{translateError}</p>
+        )}
 
         <div className="mt-1 flex items-center gap-3">
           <button
@@ -1571,6 +1616,16 @@ function CommentRow({ item, size, tabId, t, isReply = false }: {
             <ThumbsUp size={12} fill={liked ? "currentColor" : "none"} />
             {likeCount !== undefined && likeCount > 0 && <span className="tabular-nums">{fmtCount(likeCount)}</span>}
           </button>
+
+          {settings.deeplApiKey.trim() !== "" && (
+            <button
+              onClick={toggleTranslate}
+              disabled={translating}
+              className="flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-neutral-500 transition hover:text-neutral-300 disabled:opacity-40">
+              {translating && <Loader2 size={12} className="animate-spin" />}
+              {translating ? t.translating : translated ? t.showOriginal : t.translateAction}
+            </button>
+          )}
 
           {!isReply && !!displayReplyCount && (
             <button
@@ -1645,7 +1700,7 @@ function CommentRow({ item, size, tabId, t, isReply = false }: {
         {repliesOpen && replies && replies.length > 0 && (
           <ul className="mt-1 border-l border-neutral-800 pl-2">
             {replies.map((reply) => (
-              <CommentRow key={reply.id} item={reply} size={size} tabId={tabId} t={t} isReply />
+              <CommentRow key={reply.id} item={reply} size={size} tabId={tabId} t={t} settings={settings} isReply />
             ))}
           </ul>
         )}

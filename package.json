@@ -52,7 +52,8 @@
       "tabs"
     ],
     "host_permissions": [
-      "https://www.youtube.com/*"
+      "https://www.youtube.com/*",
+      "https://api-free.deepl.com/*"
     ],
     "action": {
       "default_title": "サブ画面を開く / 前面へ (Alt+Y)"

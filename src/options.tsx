@@ -6,6 +6,7 @@
  * （src/popup.tsx を置くと default_popup が自動登録されるのと同じ仕組み。D-03参照）。
  */
 import { useEffect, useState } from "react"
+import { DEEPL_TARGET_LANGS } from "~lib/deepl"
 import { getDictionary } from "~lib/i18n"
 import {
   DEFAULT_RELATED_DISPLAY_SIZE,
@@ -249,6 +250,32 @@ export default function Options() {
                 </button>
               ))}
             </div>
+          </Field>
+        </Section>
+
+        {/* コメントの翻訳（DeepL・任意） */}
+        <Section title={t.sectionTranslate}>
+          <Field label={t.deeplApiKeyLabel} hint={t.deeplApiKeyHint}>
+            <input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={settings.deeplApiKey}
+              onChange={(e) => update({ deeplApiKey: e.target.value })}
+              placeholder={t.deeplApiKeyPlaceholder}
+              className="w-full rounded border border-neutral-700 bg-neutral-800 px-2.5 py-1.5 font-mono text-xs text-neutral-200 placeholder:text-neutral-600"
+            />
+          </Field>
+
+          <Field label={t.translateTargetLangLabel} hint={t.translateTargetLangHint}>
+            <select
+              value={settings.translateTargetLang}
+              onChange={(e) => update({ translateTargetLang: e.target.value })}
+              className="rounded border border-neutral-700 bg-neutral-800 px-2.5 py-1.5 text-sm text-neutral-200">
+              {DEEPL_TARGET_LANGS.map((lang) => (
+                <option key={lang} value={lang}>{lang}</option>
+              ))}
+            </select>
           </Field>
         </Section>
 

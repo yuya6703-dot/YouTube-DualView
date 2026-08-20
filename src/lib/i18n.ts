@@ -151,6 +151,23 @@ export interface Dictionary {
   languageHint: string
   languageJa: string
   languageEn: string
+
+  // コメントの手動翻訳（DeepL）
+  translateAction: string
+  translating: string
+  showOriginal: string
+  translatedBy: (lang: string) => string
+  translateErrNoKey: string
+  translateErrInvalidKey: string
+  translateErrQuota: string
+  translateErrNetwork: string
+  translateErrGeneric: string
+  sectionTranslate: string
+  deeplApiKeyLabel: string
+  deeplApiKeyHint: string
+  deeplApiKeyPlaceholder: string
+  translateTargetLangLabel: string
+  translateTargetLangHint: string
 }
 
 const ja: Dictionary = {
@@ -278,7 +295,23 @@ const ja: Dictionary = {
   languageLabel: "表示言語",
   languageHint: "サブ画面・設定画面の表示言語を切り替えます（YouTube側の表示言語には影響しません）",
   languageJa: "日本語",
-  languageEn: "English"
+  languageEn: "English",
+
+  translateAction: "翻訳",
+  translating: "翻訳中…",
+  showOriginal: "元の文章を表示",
+  translatedBy: (lang) => `${lang}から翻訳（DeepL）`,
+  translateErrNoKey: "設定画面でDeepLのAPIキーを登録してください",
+  translateErrInvalidKey: "APIキーが無効です。設定画面を確認してください",
+  translateErrQuota: "DeepLの利用上限に達しました",
+  translateErrNetwork: "通信エラーが発生しました",
+  translateErrGeneric: "翻訳に失敗しました",
+  sectionTranslate: "コメントの翻訳",
+  deeplApiKeyLabel: "DeepL APIキー（無料枠）",
+  deeplApiKeyHint: "コメントの「翻訳」ボタンを押したときだけ、そのコメント本文がDeepLへ送信されます。空欄なら翻訳機能は無効のままです。キーは https://www.deepl.com/ja/your-account/keys から無料で取得できます",
+  deeplApiKeyPlaceholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx",
+  translateTargetLangLabel: "翻訳先の言語",
+  translateTargetLangHint: "コメントを翻訳するときの変換先言語です"
 }
 
 const en: Dictionary = {
@@ -406,7 +439,23 @@ const en: Dictionary = {
   languageLabel: "Display language",
   languageHint: "Switches the language of the sub window and this settings page (does not affect YouTube's own display language)",
   languageJa: "日本語",
-  languageEn: "English"
+  languageEn: "English",
+
+  translateAction: "Translate",
+  translating: "Translating…",
+  showOriginal: "Show original",
+  translatedBy: (lang) => `Translated from ${lang} (DeepL)`,
+  translateErrNoKey: "Set a DeepL API key on the settings page first",
+  translateErrInvalidKey: "Invalid API key. Check the settings page",
+  translateErrQuota: "DeepL usage limit reached",
+  translateErrNetwork: "A network error occurred",
+  translateErrGeneric: "Translation failed",
+  sectionTranslate: "Comment translation",
+  deeplApiKeyLabel: "DeepL API key (free tier)",
+  deeplApiKeyHint: "A comment's text is sent to DeepL only when you press its \"Translate\" button. Leave this blank to keep translation disabled. Get a free key at https://www.deepl.com/en/your-account/keys",
+  deeplApiKeyPlaceholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx",
+  translateTargetLangLabel: "Translate to",
+  translateTargetLangHint: "The language comments are translated into"
 }
 
 const DICTIONARIES: Record<Language, Dictionary> = { ja, en }

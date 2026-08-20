@@ -6,7 +6,7 @@ title: Privacy Policy — DualView for YouTube
 
 **DualView for YouTube**
 
-最終更新日 / Last updated: 2026-08-19
+最終更新日 / Last updated: 2026-08-20
 
 ---
 
@@ -14,11 +14,27 @@ title: Privacy Policy — DualView for YouTube
 
 ### 収集する情報
 
-**この拡張機能は、いかなる個人情報も収集・送信・共有しません。**
+**この拡張機能は、利用状況の収集・アクセス解析・クラッシュレポートの送信を
+一切行いません。** 開発者を含む第三者が、あなたの利用状況を知る手段はありません。
 
-開発者を含む第三者が、あなたの利用状況を知る手段はありません。アクセス解析、
-クラッシュレポート、利用統計を含め、外部のサーバーへ情報を送る仕組みを
-一切実装していません。
+**コメントの翻訳機能（任意・既定でオフ）を除き、外部サーバーへ通信する
+コードは実装されていません。**
+
+### コメントの翻訳機能について
+
+サブ画面のコメントには「翻訳」ボタンがあります。これは**あなたが設定画面で
+DeepL（翻訳サービス）のAPIキーを登録した場合にだけ表示され**、
+**あなたがコメントごとに個別にボタンを押した時にだけ**動作します。
+
+- 送信されるのは、あなたが翻訳ボタンを押した**そのコメントの本文だけ**です
+- 自動翻訳・一括送信は行いません。ボタンを押していないコメントの内容は送信されません
+- 送信先はDeepL（DeepL SE, ドイツ）のAPIサーバーです。DeepLでのデータの
+  扱いについては [DeepLのプライバシーポリシー](https://www.deepl.com/ja/privacy)
+  を参照してください。特に無料枠のAPIキーを使う場合、送信した文章が
+  DeepL側の翻訳品質向上に利用される場合があります（DeepLの規約による）
+- APIキーを設定していなければ、この機能は完全に無効で、何も送信されません
+- APIキー自体もあなたのブラウザ内（`chrome.storage`）にのみ保存され、
+  開発者を含む第三者には送られません
 
 ### 保存される情報とその保存場所
 
@@ -41,8 +57,9 @@ title: Privacy Policy — DualView for YouTube
 | `storage` | 上記の設定・キュー・メモをあなたのブラウザ内に保存するため |
 | `tabs` | 操作対象のYouTubeタブを特定し、サブ画面ウィンドウを開閉するため |
 | `https://www.youtube.com/*` | YouTubeのページ上で、再生操作・関連動画やコメントの読み取りを行うため |
+| `https://api-free.deepl.com/*` | コメントの「翻訳」ボタンを押した時だけ、DeepLの翻訳APIへ接続するため |
 
-この拡張機能はYouTube以外のいかなるウェブサイトにもアクセスしません。
+この拡張機能がアクセスするのはYouTubeと、翻訳機能を使った場合のDeepLのみです。
 
 ### 外部サービスとの関係
 
@@ -63,11 +80,28 @@ Google LLCによる承認・提携・後援を受けていません。
 
 ### Information We Collect
 
-**This extension does not collect, transmit, or share any personal information.**
+**This extension does not collect usage analytics, and has no crash or usage
+reporting.** Neither the developer nor any third party has any way to learn
+how you use it.
 
-Neither the developer nor any third party has any way to learn how you use it.
-No analytics, crash reporting, or usage statistics are implemented — there is no
-code in this extension that sends data to any external server.
+**Aside from the optional, off-by-default comment translation feature, there
+is no code in this extension that contacts any external server.**
+
+### About the Comment Translation Feature
+
+The Popout shows a "Translate" button on comments. It **only appears once
+you've entered a DeepL (translation service) API key on the settings page**,
+and **only acts when you press it on a specific comment**.
+
+- Only the text of the comment you clicked "Translate" on is sent — nothing else
+- No automatic or bulk translation happens. Comments you never click stay untouched
+- It's sent to DeepL's (DeepL SE, Germany) API servers. See
+  [DeepL's privacy policy](https://www.deepl.com/en/privacy) for how they
+  handle it — notably, text sent through a free-tier API key may be used by
+  DeepL to improve translation quality, per DeepL's own terms
+- With no API key configured, this feature is fully inactive and nothing is sent
+- The API key itself is stored only in your browser (`chrome.storage`) and is
+  never sent anywhere except to DeepL when you translate a comment
 
 ### What Is Stored, and Where
 
@@ -90,8 +124,9 @@ All of it is deleted when you remove the extension from your browser.
 | `storage` | To save the settings, queue, and notes above inside your browser |
 | `tabs` | To identify which YouTube tab to control, and to open/close the sub window |
 | `https://www.youtube.com/*` | To control playback and read related videos and comments on YouTube pages |
+| `https://api-free.deepl.com/*` | To reach DeepL's translation API, only when you press "Translate" on a comment |
 
-This extension does not access any website other than YouTube.
+This extension only ever accesses YouTube, and DeepL if you use the translation feature.
 
 ### Relationship to External Services
 
