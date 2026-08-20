@@ -1590,15 +1590,10 @@ function CommentRow({ item, size, tabId, t, settings, isReply = false }: {
           {item.publishedAt && <span className="shrink-0 text-neutral-600">{item.publishedAt}</span>}
         </p>
         <p className={`mt-0.5 whitespace-pre-wrap break-words leading-snug text-neutral-300 ${cls.body}`}>
-          <CommentBody item={item} tabId={tabId} />
+          {translated ? translated.text : <CommentBody item={item} tabId={tabId} />}
         </p>
         {translated && (
-          <div className="mt-1 rounded bg-neutral-950/60 px-2 py-1.5">
-            <p className={`whitespace-pre-wrap break-words leading-snug text-neutral-200 ${cls.body}`}>
-              {translated.text}
-            </p>
-            <p className="mt-0.5 text-[10px] text-neutral-600">{t.translatedBy(translated.sourceLang)}</p>
-          </div>
+          <p className="mt-0.5 text-[10px] text-neutral-600">{t.translatedBy(translated.sourceLang)}</p>
         )}
         {translateError && (
           <p className="mt-1 text-[11px] leading-snug text-red-400">{translateError}</p>
