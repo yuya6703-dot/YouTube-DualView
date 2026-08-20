@@ -206,8 +206,8 @@ function onNavigated() {
   resetVideoCaches()
   // 実在する動画から別の動画へ移ったときだけ、前の動画のDOMが残り得る。
   // 初回ロードには混入し得る「前の動画」がないので待たない。
-  awaitingFreshRelated = previousVideoId !== null
-  awaitingRelatedSince = Date.now()
+  if (previousVideoId !== null) beginAwaitingFreshRelated()
+  else clearAwaitingFreshRelated()
   bindVideo()
   emit({ type: "VIDEO_CHANGED", payload: { videoId: id, kind: getKind() } })
   // ライブチャットstreamは未実装のため、親ページ側feedは常にcommentとして扱う。
@@ -461,8 +461,7 @@ function fetchRelated(): QueueItem[] {
     if (!hasFreshItem && Date.now() - awaitingRelatedSince <= FRESH_RELATED_TIMEOUT_MS) {
       return Array.from(relatedItemCache.values())
     }
-    awaitingFreshRelated = false
-    navigationStartRelatedIds = null
+    clearAwaitingFreshRelated()
   }
 
   for (const item of parsed) {
@@ -512,7 +511,40 @@ let relatedLoading = false
 let navigationStartRelatedIds: Set<string> | null = null
 let awaitingFreshRelated = false
 let awaitingRelatedSince = 0
+let awaitingRelatedTimerId: number | null = null
 const FRESH_RELATED_TIMEOUT_MS = 4000
+
+/**
+ * 「前の動画のDOMが残っている間は取り込まない」待機を開始する。
+ *
+ * ★ タイマーが必須。待機の解除判定は fetchRelated() の中でしか行われず、
+ *   その呼び出しは MutationObserver（＝DOMの変化）に依存している。
+ *   ところがYouTubeは関連動画を埋め終えると変化を止めるため、タイマーが無いと
+ *   「時間切れになっても、それを判定するコードが二度と呼ばれない」というデッドロックになり、
+ *   関連動画が永久に更新されなくなる（2026-08-19 実機で発生）。
+ */
+function beginAwaitingFreshRelated() {
+  awaitingFreshRelated = true
+  awaitingRelatedSince = Date.now()
+  if (awaitingRelatedTimerId !== null) window.clearTimeout(awaitingRelatedTimerId)
+  awaitingRelatedTimerId = window.setTimeout(() => {
+    awaitingRelatedTimerId = null
+    if (!awaitingFreshRelated || ports.size === 0) return
+    // 時間切れ。scheduleRelatedEmit経由でfetchRelated()を必ず1回通し、
+    // タイムアウト判定を実行させて待機を解除する。
+    scheduleRelatedEmit()
+  }, FRESH_RELATED_TIMEOUT_MS + 200)
+}
+
+function clearAwaitingFreshRelated() {
+  awaitingFreshRelated = false
+  awaitingRelatedSince = 0
+  navigationStartRelatedIds = null
+  if (awaitingRelatedTimerId !== null) {
+    window.clearTimeout(awaitingRelatedTimerId)
+    awaitingRelatedTimerId = null
+  }
+}
 
 /** SPA遷移開始時点の関連動画IDを「前動画の分」として記録する。 */
 function capturePreNavigationRelated() {
@@ -1491,9 +1523,7 @@ function stopWatchPageObservers() {
   navigationStartCommentSnapshot = null
   awaitingFreshComments = false
   awaitingSince = 0
-  navigationStartRelatedIds = null
-  awaitingFreshRelated = false
-  awaitingRelatedSince = 0
+  clearAwaitingFreshRelated()
   commentsRetryToken++
   commentLoadRun++
   commentLoading = false
@@ -1647,8 +1677,7 @@ chrome.runtime.onConnect.addListener((port) => {
     navigationStartCommentSnapshot = null
     // Port不在中は監視を止めているため、現在ページを「初回」として扱う。
     // 待たずにその場のDOMを取り込んでよい（混入し得る前動画のDOMは既に消えている）。
-    navigationStartRelatedIds = null
-    awaitingFreshRelated = false
+    clearAwaitingFreshRelated()
     relatedPageState = initialPageState("related")
     commentPageState = initialPageState("comment")
     if (location.pathname === "/watch" && lastVideoId) {
