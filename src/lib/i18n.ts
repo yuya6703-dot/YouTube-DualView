@@ -308,7 +308,7 @@ const ja: Dictionary = {
   translateErrGeneric: "翻訳に失敗しました",
   sectionTranslate: "コメントの翻訳",
   deeplApiKeyLabel: "DeepL APIキー（無料枠）",
-  deeplApiKeyHint: "コメントの「翻訳」ボタンを押したときだけ、そのコメント本文がDeepLへ送信されます。空欄なら翻訳機能は無効のままです。キーは https://www.deepl.com/ja/your-account/keys から無料で取得できます",
+  deeplApiKeyHint: "コメントの「翻訳」ボタンを押したときだけ、APIキー・翻訳先言語・そのコメント本文がDeepLへ直接送信されます。空欄なら翻訳機能は無効のままです。キーは https://www.deepl.com/ja/your-account/keys から無料で取得できます",
   deeplApiKeyPlaceholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx",
   translateTargetLangLabel: "翻訳先の言語",
   translateTargetLangHint: "コメントを翻訳するときの変換先言語です"
@@ -452,7 +452,7 @@ const en: Dictionary = {
   translateErrGeneric: "Translation failed",
   sectionTranslate: "Comment translation",
   deeplApiKeyLabel: "DeepL API key (free tier)",
-  deeplApiKeyHint: "A comment's text is sent to DeepL only when you press its \"Translate\" button. Leave this blank to keep translation disabled. Get a free key at https://www.deepl.com/en/your-account/keys",
+  deeplApiKeyHint: "Your API key, target language, and a comment's text are sent directly to DeepL only when you press that comment's \"Translate\" button. Leave this blank to keep translation disabled. Get a free key at https://www.deepl.com/en/your-account/keys",
   deeplApiKeyPlaceholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx",
   translateTargetLangLabel: "Translate to",
   translateTargetLangHint: "The language comments are translated into"

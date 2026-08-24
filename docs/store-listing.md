@@ -77,9 +77,11 @@ Watch YouTube fullscreen on one monitor while browsing related videos, comments,
 
 ■ プライバシー
 
-この拡張機能は情報を一切収集しません。設定・キュー・メモはすべて
-あなたのブラウザ内にのみ保存され、外部に送信されることはありません。
-外部サーバーへ通信するコードは実装されていません。
+この拡張機能は利用状況の収集やアクセス解析を行いません。設定・キュー・メモは
+あなたのブラウザ内にのみ保存されます。任意のコメント翻訳機能を設定した場合だけ、
+「翻訳」を押したコメント本文・翻訳先言語・APIキーをDeepLへ直接送信します。
+自動送信・一括送信は行いません。サブ画面から投稿したコメントと返信は、
+明示的に投稿ボタンを押した場合だけYouTubeへ送信されます。開発者のサーバーへの送信はありません。
 
 ■ ご注意
 
@@ -132,9 +134,13 @@ the video or leave fullscreen.
 
 ■ Privacy
 
-This extension collects nothing. Your settings, queue, and notes are stored
-only inside your browser and are never transmitted. There is no code in this
-extension that contacts any external server.
+This extension does not collect usage analytics. Your settings, queue, and
+notes are stored only inside your browser. If you configure the optional
+comment translation feature, only the comment you choose to translate, the
+target language, and your API key are sent directly to DeepL. Nothing is sent
+automatically or in bulk. Comments and replies composed in the Popout are sent
+to YouTube only when you explicitly submit them. Nothing is sent to a server
+operated by the developer.
 
 ■ Notes
 
@@ -159,13 +165,16 @@ https://github.com/yuya6703-dot/YouTube-DualView
 ```
 ユーザーの設定（音量、再生速度の刻み幅、表示言語など）、「次に再生」キュー、
 タイムスタンプメモをブラウザ内に保存し、次回起動時に復元するために使用します。
-外部への送信は行いません。
+翻訳用APIキーと翻訳先言語だけは、ユーザーがコメントの「翻訳」を押したときに限り、
+DeepLへ直接送信されます。その他の保存データは外部へ送信しません。
 ```
 
 ```
 Used to save user settings (volume, speed step, display language), the up-next
 queue, and timestamp notes inside the browser so they persist across sessions.
-Nothing is transmitted externally.
+Only the translation API key and target language are sent externally: they go
+directly to DeepL when the user chooses to translate a comment. No other stored
+data is transmitted.
 ```
 
 ### `tabs`
@@ -186,12 +195,12 @@ the target tab is closed). Browsing history is not collected.
 
 ```
 YouTubeの動画ページ上で、プレイヤーの操作、関連動画一覧とコメントの読み取り、
-コメントの投稿を行うために必要です。YouTube以外のサイトにはアクセスしません。
+コメントの投稿を行うために必要です。この権限をYouTube以外には使用しません。
 ```
 
 ```
 Required to control the player, read the related-video list and comments, and
-post comments on YouTube video pages. No other site is accessed.
+post comments on YouTube video pages. This permission is not used on other sites.
 ```
 
 ### `host_permissions: https://api-free.deepl.com/*`
@@ -199,24 +208,25 @@ post comments on YouTube video pages. No other site is accessed.
 ```
 コメントの手動翻訳機能（設定画面でDeepL APIキーを登録した場合のみ有効）で
 使用します。ユーザーがコメントごとに「翻訳」ボタンを押した時だけ、その
-コメントの本文をDeepLの翻訳APIへ送信します。自動送信・一括送信は行いません。
+コメントの本文・翻訳先言語・APIキーをDeepLの翻訳APIへ送信します。
+自動送信・一括送信は行いません。
 APIキーを設定していない場合、この権限を使う通信は一切発生しません。
 ```
 
 ```
 Used by the optional comment translation feature (only active once a DeepL
-API key is set on the settings page). Sends a comment's text to DeepL's
-translation API only when the user presses "Translate" on that specific
-comment. No automatic or bulk sending occurs. With no API key configured,
-no traffic uses this permission at all.
+API key is set on the settings page). Sends a comment's text, the target
+language, and the API key to DeepL's translation API only when the user presses
+"Translate" on that specific comment. No automatic or bulk sending occurs.
+With no API key configured, no traffic uses this permission at all.
 ```
 
 ### リモートコードの使用
 
 ```
 使用していません。すべてのコードは拡張機能のパッケージに同梱されています。
-翻訳機能で送信するのはコメントのテキストのみで、コードやスクリプトの
-ダウンロード・実行は行いません。
+翻訳機能ではコメントのテキスト・翻訳先言語・APIキーを送信しますが、
+コードやスクリプトのダウンロード・実行は行いません。
 ```
 
 ---
@@ -225,20 +235,44 @@ no traffic uses this permission at all.
 
 Chrome Web Storeの必須項目。以下のとおり申告する。
 
-- 収集するデータの種類: **すべて「収集しない」**
-  （個人情報、健康情報、金融情報、認証情報、個人的な連絡先、位置情報、
-  ユーザーアクティビティ、ウェブ閲覧履歴 — いずれもチェックしない）
+- 収集・取り扱うデータの種類（現在の管理画面で同等の項目を選ぶ）:
+  - **認証情報** — DeepL APIキーをブラウザ内に保存し、翻訳時だけDeepLへ送信する
+  - **ウェブサイトのコンテンツ** — YouTube上の動画情報・関連動画・コメントを
+    サブ画面へ表示し、選択されたコメント本文だけを翻訳時にDeepLへ送信する
+  - **個人的な連絡先／ユーザー生成コンテンツ** — ユーザーが拡張画面で入力した
+    コメントと返信を、明示的な投稿操作によりYouTubeへ渡す。管理画面に
+    「ユーザー生成コンテンツ」が独立して表示される場合はそちらも選ぶ
+- 収集・取り扱わない種類: 健康情報、金融・支払情報、位置情報、ウェブ閲覧履歴、
+  広告や分析目的のユーザーアクティビティ
 
-  ★ 翻訳機能で送信するコメント本文は「ユーザーが個別に選んだ操作の結果として、
-  第三者の翻訳サービスへ都度送るデータ」であり、Chrome Web Storeが言う
-  「収集（collect）」＝開発者側が集める・保持するデータには該当しない
-  （開発者はこの通信を一切経由・記録しない）。この整理で「収集しない」の
-  申告と矛盾しないが、**審査時に指摘された場合は、この翻訳機能の存在と
-  動作条件を追加で説明できるようにしておくこと**
+  ★ Chrome Web Storeの公式FAQでは「取り扱い」に収集・送信・利用・共有が含まれ、
+  ローカル処理・ローカル保存だけでも申告対象になる。開発者が通信を受け取らないことを
+  理由に「すべて収集しない」を選ばないこと。実際の管理画面のラベルが更新されている場合は、
+  [公式FAQ](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq)の
+  定義に従って最も近い項目を選ぶ
 - 以下の3つの宣言にすべてチェックを入れる:
   - 承認された用途以外にデータを使用または転送していない
   - 第三者に販売していない
   - 信用調査や融資目的で使用または転送していない
+
+### Limited Use申告文
+
+```
+YouTubeページとユーザー入力から取り扱う情報は、ストア掲載ページと拡張機能内で
+説明した機能を提供する目的にのみ使用します。販売、広告、信用調査には使用せず、
+開発者が閲覧・保管することもありません。外部への転送は、ユーザーが明示的に
+投稿したコメント／返信をYouTubeへ渡す場合と、ユーザーが個別に翻訳を選んだ
+コメント本文・翻訳先言語・APIキーをDeepLへ渡す場合に限ります。
+```
+
+```
+Information handled from YouTube pages and user input is used only to provide
+the features described in the store listing and extension UI. It is not sold
+or used for advertising or creditworthiness, and the developer does not view
+or retain it. External transfers are limited to comments or replies the user
+explicitly submits to YouTube and the comment text, target language, and API
+key sent to DeepL when the user explicitly requests an individual translation.
+```
 
 ---
 

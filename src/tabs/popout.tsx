@@ -313,9 +313,10 @@ export default function Popout() {
   }
 
   /** サブ画面で選んだ動画をメイン画面で再生する。メインがフルスクリーンならその状態を維持する */
-  const playVideo = (videoId: string) => {
-    if (tabId === null) return
-    void askContent(tabId, "NAVIGATE_TO_VIDEO", { videoId })
+  const playVideo = async (videoId: string): Promise<boolean> => {
+    if (tabId === null) return false
+    const res = await askContent(tabId, "NAVIGATE_TO_VIDEO", { videoId })
+    return !isErr(res) && res.data.ok
   }
 
   /** 関連動画をキューへ追加する（同じ動画が既にあれば追加しない） */
@@ -328,9 +329,10 @@ export default function Popout() {
   }
 
   /** キューの項目を選んで即再生する。その項目はキューから取り除く */
-  const playFromQueue = (item: QueueItem) => {
-    removeFromQueue(item.id)
-    playVideo(item.videoId)
+  const playFromQueue = async (item: QueueItem) => {
+    // Content Script未接続などで遷移要求自体が届かなかった場合は、
+    // 再試行できるようキューに残す。受理された後だけ永続状態から削除する。
+    if (await playVideo(item.videoId)) removeFromQueue(item.id)
   }
 
   const reorderQueue = (activeId: string, overId: string) => {
@@ -404,7 +406,7 @@ export default function Popout() {
     if (!ended || wasEnded) return
     if (!settings.autoPlayNext) return
     const next = queue[0]
-    if (next) playFromQueue(next)
+    if (next) void playFromQueue(next)
   }, [status?.ended, settings.autoPlayNext, queue])
 
   /**
@@ -1884,4 +1886,3 @@ function RelatedSizeControl({ value, onChange, t }: {
     </div>
   )
 }
-

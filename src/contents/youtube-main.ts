@@ -107,6 +107,7 @@ function resetVideoCaches() {
   relatedItemCache = new Map()
   relatedPaginationEstablished = false
   pendingAvatarIds = new Set()
+  pendingAvatarElements = new Map()
   avatarNudgedIds = new Set()
   clearAvatarNudgeQueue()
 }
@@ -447,7 +448,11 @@ function fetchRelated(): QueueItem[] {
   const container = relatedContainerEl && document.contains(relatedContainerEl)
     ? relatedContainerEl
     : q(SELECTORS.related.container)
-  if (!container) return Array.from(relatedItemCache.values())
+  if (!container) {
+    // メイン画面に関連動画欄が無いなら、サブ画面にも過去の一覧を残さない。
+    relatedItemCache = new Map()
+    return []
+  }
 
   const parsed: QueueItem[] = []
   for (const item of findRelatedItems(container).map(parseRelatedItem)) {
@@ -467,9 +472,15 @@ function fetchRelated(): QueueItem[] {
     clearAwaitingFreshRelated()
   }
 
+  // ★サブ画面の正は、常に現在のメイン画面DOMとする。
+  // Mapへ追記し続けると、メイン側で推薦が差し替え・並び替え・削除されても
+  // 古い項目と最初に登録された順序が残り、両画面が一致しなくなる。
+  // 現在のDOM順でスナップショットを作り直し、同じvideoIdが複数ある場合だけ
+  // 最初の表示位置を維持しながら、後続カードや直前snapshotの非空メタデータを補完に使う。
+  const snapshot = new Map<string, QueueItem>()
   for (const item of parsed) {
-    const existing = relatedItemCache.get(item.videoId)
-    relatedItemCache.set(item.videoId, existing ? {
+    const existing = snapshot.get(item.videoId) ?? relatedItemCache.get(item.videoId)
+    snapshot.set(item.videoId, existing ? {
       ...existing,
       title: item.title || existing.title,
       channelName: item.channelName || existing.channelName,
@@ -477,7 +488,8 @@ function fetchRelated(): QueueItem[] {
       duration: item.duration || existing.duration
     } : item)
   }
-  return Array.from(relatedItemCache.values())
+  relatedItemCache = snapshot
+  return Array.from(snapshot.values())
 }
 
 /**
@@ -504,8 +516,8 @@ let relatedLoading = false
 /**
  * 動画切り替え直後、YouTubeが前の動画の関連動画DOMをまだ差し替えていない期間がある。
  * そのまま取り込むと、前の動画の推薦が新しい動画の関連動画としてキャッシュに入る。
- * さらに relatedItemCache は古い項目を消さないため、その後に本物が届いても
- * 「前の動画の分＋新しい分」が積み上がり、一覧の先頭が前の動画のままになる
+ * 遷移中の旧DOMを一度でも現在snapshotとして採用すると、本物のDOMが届くまで
+ * サブ画面に前動画の推薦が表示されるため、差し替わりを確認するまでは取り込まない
  * （2026-08-19 実機で「関連動画(36件)なのにメイン画面のサイドバーとは別物」として報告）。
  *
  * コメント側の awaitingFreshComments と同じ考え方で、SPA遷移開始時点の動画IDを
@@ -990,7 +1002,7 @@ function parseCommentThread(el: Element): FeedItem | null {
     // permalinkのlc、またはDOM内容由来のfallback hashを安定キーにする。
     id,
     author: text(SELECTORS.comments.author, el),
-    avatarUrl: q<HTMLImageElement>(SELECTORS.comments.avatar, el)?.src ?? "",
+    avatarUrl: readCommentAvatarUrl(el),
     tokens: toTokens(q(SELECTORS.comments.body, el)),
     text: text(SELECTORS.comments.body, el),
     ...(publishedAt ? { publishedAt } : {}),
@@ -1027,7 +1039,7 @@ function parseCommentThread(el: Element): FeedItem | null {
  *   決定打になった観測は「メインタブをスクロールした後は41件すべて`src`が埋まっているのに、
  *   サブ画面は18/20が欠けたまま」。データは存在するのに、それが埋まった瞬間を誰も見て
  *   いなかったということ。0.6〜8秒の窓を過ぎてから埋まった分は、旧方式では永久に取りこぼす。
- *   `MutationObserver`は`attributeFilter:["src"]`で属性変化も監視できるので、
+ *   `MutationObserver`で画像URL属性の変化と画像要素の後挿入を監視すれば、
  *   **いつ埋まろうと確実に拾える**（`watchAvatarFills()`）。純粋な監視なのでDOMは触らない。
  *   そのうえで、ユーザーがメインタブを一切触らない通常運用のために能動トリガーも残すが、
  *   nudge対象は内側の`<img>`ではなく**ホスト要素**(`yt-img-shadow`/`#author-thumbnail`)にした。
@@ -1039,10 +1051,45 @@ const AVATAR_FILL_DEBOUNCE_MS = 200
 /** 他のnudge利用箇所（continuation等）と同じ滞在時間。短くするとIO評価に載らないことがある。 */
 const AVATAR_NUDGE_DWELL_MS = 700
 
+function normalizeCommentAvatarUrl(raw: string | null | undefined): string {
+  const value = raw?.trim().replace(/^['"]|['"]$/g, "")
+  if (!value) return ""
+  try {
+    const url = new URL(value, location.href)
+    // data: の透明placeholder等を「取得済み」と確定すると、その後の補完対象から
+    // 外れてしまう。サブ画面へ渡すのは実際に再取得できるHTTPS画像だけに限定する。
+    return url.protocol === "https:" ? url.href : ""
+  } catch {
+    return ""
+  }
+}
+
+/** srcsetだけを使うDOM世代も含め、ブラウザーが実際に選んだアイコンURLを読む。 */
+function readCommentAvatarUrl(el: Element): string {
+  const img = q<HTMLImageElement>(SELECTORS.comments.avatar, el)
+  if (!img) return ""
+  const candidates = [
+    img.currentSrc,
+    ...parseThumbnailSrcset(img.getAttribute("srcset")),
+    ...parseThumbnailSrcset(img.getAttribute("data-srcset")),
+    img.getAttribute("src"),
+    img.getAttribute("data-src"),
+    img.getAttribute("data-lazy-src")
+  ]
+  for (const candidate of candidates) {
+    const normalized = normalizeCommentAvatarUrl(candidate)
+    if (normalized) return normalized
+  }
+  return ""
+}
+
 /** アイコンが空のまま配信され、まだ埋め直せていないコメントのid。 */
 let pendingAvatarIds = new Set<string>()
+/** 保留idを最後に確認したDOM要素。仮想化による同一idの要素差し替えを検出する。 */
+let pendingAvatarElements = new Map<string, Element>()
 let avatarObserver: MutationObserver | null = null
 let avatarFillDebounceId: number | null = null
+let avatarFillSawChildList = false
 let avatarNudgeQueue: string[] = []
 let avatarNudgeQueuedIds = new Set<string>()
 let avatarNudgedIds = new Set<string>()
@@ -1074,7 +1121,10 @@ function flushPendingAvatars(): number {
   // DOMを触る前に、キャッシュだけで決着が付くidを外す（Map参照のみで安価）。
   for (const id of [...pendingAvatarIds]) {
     const cached = commentItemCache.get(id)
-    if (!cached || cached.avatarUrl) pendingAvatarIds.delete(id) // 破棄済み or 既に埋まった
+    if (!cached || cached.avatarUrl) {
+      pendingAvatarIds.delete(id) // 破棄済み or 既に埋まった
+      pendingAvatarElements.delete(id)
+    }
   }
   if (pendingAvatarIds.size === 0) return 0
 
@@ -1091,13 +1141,15 @@ function flushPendingAvatars(): number {
     const cached = commentItemCache.get(id)
     if (!cached) {
       pendingAvatarIds.delete(id)
+      pendingAvatarElements.delete(id)
       return
     }
-    const avatarUrl = q<HTMLImageElement>(SELECTORS.comments.avatar, el)?.src ?? ""
+    const avatarUrl = readCommentAvatarUrl(el)
     if (!avatarUrl) return
     const updated = { ...cached, avatarUrl }
     commentItemCache.set(id, updated)
     pendingAvatarIds.delete(id)
+    pendingAvatarElements.delete(id)
     filled.push(updated)
   }
   // 要素が差し替わっていても、現在のDOMを1回走査して突き合わせる。
@@ -1114,24 +1166,59 @@ function flushPendingAvatars(): number {
 }
 
 /**
- * コメント欄の`src`属性が埋まる瞬間を購読する。
+ * コメント欄の画像URL属性が埋まる瞬間を購読する。
  * YouTubeがいつ（ユーザーのスクロール・nudge・内部都合のいずれで）埋めても取りこぼさない。
  */
-function watchAvatarFills(container: Element) {
+function stopAvatarFillObserver() {
   avatarObserver?.disconnect()
-  avatarObserver = new MutationObserver(() => {
+  avatarObserver = null
+  if (avatarFillDebounceId !== null) {
+    window.clearTimeout(avatarFillDebounceId)
+    avatarFillDebounceId = null
+  }
+  avatarFillSawChildList = false
+}
+
+function watchAvatarFills(container: Element) {
+  stopAvatarFillObserver()
+  avatarObserver = new MutationObserver((mutations) => {
     if (pendingAvatarIds.size === 0) return
+    if (mutations.some((mutation) => mutation.type === "childList")) {
+      avatarFillSawChildList = true
+    }
     if (avatarFillDebounceId !== null) window.clearTimeout(avatarFillDebounceId)
     avatarFillDebounceId = window.setTimeout(() => {
       avatarFillDebounceId = null
       flushPendingAvatars()
+      if (avatarFillSawChildList && pendingAvatarIds.size > 0 && document.contains(container)) {
+        // 仮想化で同じコメントidのDOM要素が作り直された場合、旧要素で消費した
+        // nudge待機を新要素へ持ち越さず、下の要素世代チェックから再登録する。
+        const currentItems = [
+          ...qaTopLevelThreads(container),
+          ...qa(SELECTORS.comments.replyItem, container)
+        ]
+        scheduleAvatarBackfill(currentItems)
+      }
+      avatarFillSawChildList = false
     }, AVATAR_FILL_DEBOUNCE_MS)
   })
   avatarObserver.observe(container, {
     attributes: true,
-    attributeFilter: ["src"],
+    attributeFilter: ["src", "srcset", "data-srcset", "data-src", "data-lazy-src"],
+    // `<img src="...">`が完成済みの状態で要素ごと後挿入される場合、
+    // 属性Mutationは発生しない。childListも購読して保留中の行を再照合する。
+    childList: true,
     subtree: true
   })
+
+  // ★コンテナ差し替え時、監視を張る前からURLが設定済みなら属性変化は発生しない。
+  // 現在DOMを即時照合し、空の行は改めて補完対象へ登録する。
+  const currentItems = [
+    ...qaTopLevelThreads(container),
+    ...qa(SELECTORS.comments.replyItem, container)
+  ]
+  scheduleAvatarBackfill(currentItems, true)
+  flushPendingAvatars()
 }
 
 /**
@@ -1200,21 +1287,40 @@ function runNextAvatarNudge() {
   }
 }
 
-function scheduleAvatarBackfill(threads: Element[]) {
+function scheduleAvatarBackfill(threads: Element[], rescheduleExisting = false) {
+  // この呼び出しで新規登録（DOM再生成時は再登録）したidだけを、最後のnudge候補として保持する。
+  // pendingAvatarIds全体を使うと、別バッチの8秒タイマーが後から見つかったコメントを
+  // 本来の待機時間より早くnudgeし、1回限りの試行を消費してしまう。
+  const scheduledIds = new Set<string>()
   for (const el of threads) {
     const id = getStableCommentId(el)
     if (!id) continue
     const cached = commentItemCache.get(id)
-    if (cached !== undefined && !cached.avatarUrl) pendingAvatarIds.add(id)
+    if (cached !== undefined && !cached.avatarUrl) {
+      const alreadyPending = pendingAvatarIds.has(id)
+      const previousElement = pendingAvatarElements.get(id)
+      const elementChanged = previousElement !== undefined && previousElement !== el
+      pendingAvatarIds.add(id)
+      pendingAvatarElements.set(id, el)
+      if (elementChanged) avatarNudgedIds.delete(id)
+      if (!alreadyPending || rescheduleExisting || previousElement !== el) scheduledIds.add(id)
+    }
   }
-  if (pendingAvatarIds.size === 0) return
+  if (scheduledIds.size === 0) return
 
+  // 動画切り替え・Port切断・コメントDOM差し替えはclearAvatarNudgeQueue()を通じて
+  // 世代を進める。古いDOM用タイマーが現在のpending集合へ触れないようにする。
+  const generation = avatarNudgeGeneration
   AVATAR_BACKFILL_DELAYS_MS.forEach((delay, index) => {
     const isLast = index === AVATAR_BACKFILL_DELAYS_MS.length - 1
     window.setTimeout(() => {
-      const remaining = flushPendingAvatars()
+      if (generation !== avatarNudgeGeneration) return
+      flushPendingAvatars()
       // 待つだけでは埋まらないと確定した分だけ、能動的に読み込ませにいく。
-      if (isLast && remaining > 0) enqueueAvatarNudge([...pendingAvatarIds])
+      if (isLast) {
+        const remaining = [...scheduledIds].filter((id) => pendingAvatarIds.has(id))
+        if (remaining.length > 0) enqueueAvatarNudge(remaining)
+      }
     }, delay)
   })
 }
@@ -1648,6 +1754,8 @@ function watchComments(
   staleElements: Element[] = []
 ) {
   commentObserver?.disconnect()
+  // q()が一時的にnullを返す期間も、切断済みの旧コメントDOMを監視・保持し続けない。
+  stopAvatarFillObserver()
   // 実ナビゲーション時だけ世代を進める。1秒保険の再探索で進めると、
   // 初回ローダーが毎秒無効化されて永遠に完了しない。
   if (isNavigation) {
@@ -1666,12 +1774,27 @@ function watchComments(
     pendingUnsafeCommentEls = staleElements
   }
 
+  const previousContainer = commentContainerEl
   const container = q(SELECTORS.comments.section)
   commentContainerEl = container
   if (!container) {
+    // 旧コンテナが外れた直後は、そのDOMに対するnudgeと遅延タイマーも止める。
+    if (previousContainer !== null) {
+      pendingAvatarElements = new Map()
+      clearAvatarNudgeQueue()
+    }
     // 0件時でもサブ側から初期化を要求できるよう、#below等の親領域を刺激する。
     loadMoreComments()
     return
+  }
+
+  // 同じ動画でもYouTubeがコメント欄を作り直した場合、新しい画像ホストには
+  // もう一度だけnudgeを許可する。古い要素での失敗を新DOMへ持ち越さない。
+  if (container !== previousContainer) {
+    pendingAvatarElements = new Map()
+    avatarNudgedIds = new Set()
+    // 旧DOM用の実行待ち・実行中nudgeとbackfillタイマーを世代ごと無効化する。
+    clearAvatarNudgeQueue()
   }
 
   if (pendingCommentNavigation) {
@@ -1694,7 +1817,7 @@ function watchComments(
 
   commentObserver = new MutationObserver(scheduleCommentEmit)
   commentObserver.observe(container, { childList: true, subtree: true })
-  watchAvatarFills(container) // アイコンの`src`が後から埋まる瞬間を取りこぼさない
+  watchAvatarFills(container) // アイコンの画像URLが後から埋まる瞬間を取りこぼさない
   scheduleCommentEmit() // 遷移時点で既に読み込み済みのコメントも拾う
   loadMoreComments()
 }
@@ -1716,12 +1839,8 @@ function stopWatchPageObservers() {
     window.clearTimeout(commentDebounceId)
     commentDebounceId = null
   }
-  avatarObserver?.disconnect()
-  avatarObserver = null
-  if (avatarFillDebounceId !== null) {
-    window.clearTimeout(avatarFillDebounceId)
-    avatarFillDebounceId = null
-  }
+  stopAvatarFillObserver()
+  pendingAvatarElements = new Map() // 切断済みDOMへの強参照は保持しない
   // detachされたDOMへnudgeを撃ち続けない。保留id自体は動画が同じなら再取得で活きるので消さない。
   clearAvatarNudgeQueue()
   pendingCommentNavigation = false
@@ -1835,8 +1954,16 @@ function collectCommentItems(): FeedItem[] {
       markCommentSeen(el)
       const item = parseCommentThread(el)
       if (!item) continue
-      commentItemCache.set(item.id, item)
+      const cached = commentItemCache.get(item.id)
+      // DOM再生成でsrcが一時的に空へ戻っていても、取得済みのURLを捨てない。
+      const hydrated = !item.avatarUrl && cached?.avatarUrl
+        ? { ...item, avatarUrl: cached.avatarUrl }
+        : item
+      commentItemCache.set(item.id, hydrated)
     }
+    // ここでmarkCommentSeen()した行は通常のemit経路では再解析されないため、
+    // 空アバターを再水和処理自身から補完対象へ登録する必要がある。
+    scheduleAvatarBackfill(threads)
   }
   // コンテナが一時的に未生成でも、同一動画で以前取得済みの行は失わず返す。
   return cacheMatchesVideo ? Array.from(commentItemCache.values()) : []
@@ -1896,16 +2023,21 @@ chrome.runtime.onConnect.addListener((port) => {
   }
   bindVideo()
   pushStatus() // 接続直後に必ず1回投げる（初期表示の空白を防ぐ）
+  // rehydratePort()が新しく登録する空アバターと、Port不在中から保留されていた
+  // アバターを区別する。後者だけを即時再試行し、前者には通常の待機時間を与える。
+  const pendingBeforeRehydrate = wasInactive ? new Set(pendingAvatarIds) : new Set<string>()
   rehydratePort(port)
 
-  // ★ Port不在中はアイコンの`src`変化を監視できていないため、その間に埋まった分を
+  // ★ Port不在中はアイコンの画像URL変化を監視できていないため、その間に埋まった分を
   //   取りこぼしたままになる（再接続時、既存コメントは全て既読なので
   //   `scheduleAvatarBackfill()`が走らず、待っていても永久に埋まらない）。
   //   rehydrateの**後**に流すこと。先に流すと、rehydrateが送る一覧より先に
   //   個別のFEED_APPENDが着いて、サブ画面の並び順が入れ替わる。
-  if (wasInactive && pendingAvatarIds.size > 0) {
+  if (wasInactive && pendingBeforeRehydrate.size > 0) {
     avatarNudgedIds = new Set() // 再接続は仕切り直し。1回の失敗で恒久的に諦めない
-    if (flushPendingAvatars() > 0) enqueueAvatarNudge([...pendingAvatarIds])
+    flushPendingAvatars()
+    const unresolved = [...pendingBeforeRehydrate].filter((id) => pendingAvatarIds.has(id))
+    if (unresolved.length > 0) enqueueAvatarNudge(unresolved)
   }
 
   port.onMessage.addListener((msg: StreamCommand) => {
