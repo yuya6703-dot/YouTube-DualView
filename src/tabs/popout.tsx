@@ -22,7 +22,7 @@ import {
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { Check, ChevronDown, ChevronUp, ClipboardCopy, Columns2, CornerDownRight, Expand, GripVertical, ListPlus, ListVideo, Loader2, Maximize2, MessageSquare, Minimize2, Pause, Pin, Play, Plus, RefreshCw, RotateCcw, RotateCw, Rows2, Search, Shrink, Stethoscope, StickyNote, ThumbsUp, Trash2, Volume2, VolumeX, X } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   DEFAULT_RELATED_DISPLAY_SIZE,
   DEFAULT_SETTINGS,
@@ -56,10 +56,54 @@ const fmt = (s: number) => {
 
 type CommentFontSize = "sm" | "md" | "lg"
 
-const COMMENT_SIZE_CLASSES: Record<CommentFontSize, { meta: string; body: string }> = {
-  sm: { meta: "text-[11px]", body: "text-[11px]" },
-  md: { meta: "text-[12px]", body: "text-[13px]" },
-  lg: { meta: "text-[13px]", body: "text-[15px]" }
+/**
+ * 長いコメントを畳んでおく行数。`line-clamp-6`と必ず一致させること
+ * （Tailwindはソースを文字列として走査するため、クラス名は必ずリテラルで書く。
+ *  `line-clamp-${n}`のように組み立てるとCSSが出力されない）。
+ */
+const COMMENT_CLAMP_LINES = 6
+const COMMENT_CLAMP_CLASS = "line-clamp-6"
+
+/**
+ * `clampBudget`は「畳むほど長い」と判定する本文の表示幅（全角=2, 半角=1）。
+ *
+ * 導出: サブ画面の既定幅460pxから左右padding 32pxとアイコン＋隙間 38pxを引くと
+ * 本文の幅はおよそ390px。全角1文字＝フォントサイズと同じ幅＝2単位なので、
+ * 1単位はフォントサイズの半分。1行に入る単位数は 390 ÷ (fontSize ÷ 2) で、
+ * `COMMENT_CLAMP_LINES`行ぶんが 11px→420 / 13px→360 / 15px→312 になる。
+ * 実際の値はそこへ1割ほど余裕を持たせている。判定が甘い側（畳まない）は
+ * 全文が出るだけで実害がないのに対し、辛い側は「押しても何も変わらないボタン」に
+ * なるため、意図的に甘い方へ倒している。
+ */
+const COMMENT_SIZE_CLASSES: Record<CommentFontSize, { meta: string; body: string; clampBudget: number }> = {
+  sm: { meta: "text-[11px]", body: "text-[11px]", clampBudget: 460 },
+  md: { meta: "text-[12px]", body: "text-[13px]", clampBudget: 400 },
+  lg: { meta: "text-[13px]", body: "text-[15px]", clampBudget: 340 }
+}
+
+/** 全角として数える文字（CJK・かな・全角記号・ハングル）。 */
+const FULLWIDTH_PATTERN =
+  /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︐-︙︰-﹯＀-｠￠-￦]/g
+
+/**
+ * 本文の「行数」と「表示幅」をDOMを触らずに見積もる。
+ *
+ * ★ 実測（`scrollHeight > clientHeight`やResizeObserver）は使えない。コメント行の
+ *   `<li>`は`contentVisibility: "auto"`なので、画面外の行は描画がスキップされ、
+ *   測っても0か古い値が返る。コメントは件数を打ち切らないため、全行にObserverを
+ *   張るのも「メインタブの再生を邪魔しない」という本ツールの前提に反する。
+ *
+ * ★ 文字数ではなく幅で測る。同じ200文字でも日本語は英語のおよそ倍の高さになるため、
+ *   単純な文字数では、どちらかの言語で必ず判定がずれる。
+ */
+function measureCommentBody(text: string): { lines: number; width: number } {
+  const fullwidth = text.match(FULLWIDTH_PATTERN)?.length ?? 0
+  const newlines = text.match(/\n/g)?.length ?? 0
+  return {
+    lines: newlines + 1,
+    // 全角は半角2つぶん。サロゲートペア（絵文字など）はlengthが2なので自然に広く数えられる。
+    width: text.length + fullwidth
+  }
 }
 
 const BADGE_CLASS: Record<ConnState, string> = {
@@ -1465,6 +1509,33 @@ function CommentRow({ item, size, tabId, t, settings, isReply = false }: {
   const [translating, setTranslating] = useState(false)
   const [translateError, setTranslateError] = useState<string | null>(null)
 
+  // 長いコメントは既定で畳んでおき、「詳細」で全文、「一部を表示」で畳み直す。
+  // 翻訳と同じくこの行の中だけで持つ（表示モードを切り替えると畳んだ状態に戻るが、
+  // 翻訳表示と同じ挙動なので許容する）。
+  const [expanded, setExpanded] = useState(false)
+
+  /**
+   * 畳むほど長いか。★この1つのフラグが「省略表示」と「詳細ボタン」の両方を握る。
+   * そのため見落とした側（長いのにfalse）は全文がそのまま出るだけで実害がなく、
+   * 逆に過検出（短いのにtrue）だけが「押しても何も変わらないボタン」になる。
+   * 判定は既定幅寄りに置き、過検出しない側へ倒している。
+   */
+  const needsClamp = useMemo(() => {
+    // 表示している方の文字列で測る。翻訳すると長さが変わる（日→英で伸びやすい）ため、
+    // 元の本文だけで判定すると翻訳後に表示と食い違う。
+    let source: string
+    if (translated) {
+      source = translated.text
+    } else if (item.tokens.length > 0) {
+      // 絵文字は`v`を持たないので、全角1文字ぶんの幅として数える。
+      source = item.tokens.map((token) => (token.t === "emoji" ? "　" : token.v)).join("")
+    } else {
+      source = item.text // tokensが空のときはCommentBodyもitem.textを描画する
+    }
+    const { lines, width } = measureCommentBody(source)
+    return lines > COMMENT_CLAMP_LINES || width > cls.clampBudget
+  }, [item.tokens, item.text, translated, cls.clampBudget])
+
   const translateErrorMessage = (code: string): string => {
     if (code === "NO_API_KEY") return t.translateErrNoKey
     if (code === "INVALID_KEY") return t.translateErrInvalidKey
@@ -1591,9 +1662,23 @@ function CommentRow({ item, size, tabId, t, settings, isReply = false }: {
           <span className="truncate font-medium text-neutral-300">{item.author || "—"}</span>
           {item.publishedAt && <span className="shrink-0 text-neutral-600">{item.publishedAt}</span>}
         </p>
-        <p className={`mt-0.5 whitespace-pre-wrap break-words leading-snug text-neutral-300 ${cls.body}`}>
+        <p
+          className={`mt-0.5 whitespace-pre-wrap break-words leading-snug text-neutral-300 ${cls.body}${
+            needsClamp && !expanded ? ` ${COMMENT_CLAMP_CLASS}` : ""
+          }`}>
           {translated ? translated.text : <CommentBody item={item} tabId={tabId} />}
         </p>
+        {/* ★ ボタンは必ず本文<p>の「外」に置く。line-clampは`overflow:hidden`なので、
+            中に入れると省略された行と一緒に切り落とされ、必要なときに限って消える。 */}
+        {needsClamp && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            className="mt-0.5 flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-neutral-500 transition hover:text-neutral-300">
+            {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            {expanded ? t.showPartialComment : t.showFullComment}
+          </button>
+        )}
         {translated && (
           <p className="mt-0.5 text-[10px] text-neutral-600">{t.translatedBy(translated.sourceLang)}</p>
         )}

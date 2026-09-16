@@ -91,6 +91,9 @@ export interface Dictionary {
   posting: string
   like: string
   unlike: string
+  // 長いコメントの省略表示トグル。パネル見出しの expand/collapse とは別物なので使い回さない
+  showFullComment: string
+  showPartialComment: string
   replyCount: (n: number) => string
   replyAction: string
   replyPlaceholder: string
@@ -239,6 +242,8 @@ const ja: Dictionary = {
   posting: "投稿中…",
   like: "いいね",
   unlike: "いいねを取り消す",
+  showFullComment: "詳細",
+  showPartialComment: "一部を表示",
   replyCount: (n) => `返信 ${n}件`,
   replyAction: "返信する",
   replyPlaceholder: "返信を入力",
@@ -383,6 +388,8 @@ const en: Dictionary = {
   posting: "Posting…",
   like: "Like",
   unlike: "Remove like",
+  showFullComment: "Show more",
+  showPartialComment: "Show less",
   replyCount: (n) => `${n} ${n === 1 ? "reply" : "replies"}`,
   replyAction: "Reply",
   replyPlaceholder: "Add a reply",
