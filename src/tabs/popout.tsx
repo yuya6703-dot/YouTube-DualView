@@ -1709,7 +1709,10 @@ function CommentRow({ item, size, tabId, t, settings, isReply = false }: {
             </button>
           )}
 
-          {!isReply && !!displayReplyCount && (
+          {/* 返信行にも出す。新スレッドUIでは返信がさらに返信を持てるため、
+              CommentRowが再帰的にネストして「返信の返信」を辿れる。
+              件数はCS側が包んでいるスレッドから補って渡してくる。 */}
+          {!!displayReplyCount && (
             <button
               onClick={toggleReplies}
               disabled={repliesLoading}

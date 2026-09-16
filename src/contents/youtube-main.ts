@@ -803,6 +803,50 @@ function qaTopLevelThreads(container: ParentNode): Element[] {
   )
 }
 
+/** 候補配列を closest()/matches() 用の1本のセレクタにまとめたもの。 */
+const COMMENT_THREAD_SELECTOR = SELECTORS.comments.thread.join(",")
+/** 返信が並ぶ容れ物。新旧UIどちらの世代でもこのどちらかの中に返信がある。 */
+const REPLIES_CONTAINER_SELECTOR = "#replies, #expanded-threads"
+
+/**
+ * コメント要素から、そのコメントを「自身のコメント＋自身宛ての返信欄」として持つ
+ * スレッド要素（`ytd-comment-thread-renderer`）を返す。持たないなら null。
+ *
+ * ★ 新スレッドUIでは返信そのものも`ytd-comment-thread-renderer`に包まれ、その中に
+ *   自分専用の`#replies`（＝返信への返信）を持つ。トップレベルは要素自身がスレッド、
+ *   包まれた返信は`closest()`で包んでいるスレッドを引く。
+ * ★ 旧UIの返信（包まれていない裸の`ytd-comment-view-model`）では`closest()`が
+ *   **親スレッド**を返してしまう。それを自分のスレッドだと思ってトグルを押すと
+ *   親スレッドを畳んでしまうため、「最も近い返信欄の持ち主がこのスレッド自身か」で
+ *   見分ける。自身のコメントなら最も近い返信欄はスレッドの外（親側）にあり、
+ *   裸の返信なら最も近い返信欄はそのスレッド自身のものになる。
+ */
+function resolveOwnThread(el: Element): Element | null {
+  if (el.matches(COMMENT_THREAD_SELECTOR)) return el
+  const thread = el.closest(COMMENT_THREAD_SELECTOR)
+  if (!thread) return null
+  const nearestRepliesOwner =
+    el.closest(REPLIES_CONTAINER_SELECTOR)?.closest(COMMENT_THREAD_SELECTOR) ?? null
+  return nearestRepliesOwner === thread ? null : thread
+}
+
+/**
+ * スレッド直下の返信だけを返す（入れ子の子スレッドが持つ「返信への返信」は含めない）。
+ *
+ * ★ `thread.querySelectorAll("A B")`は「threadの子孫で、かつ**文書全体で**祖先にAを持つB」
+ *   を返す。入れ子スレッドNの中で`replyItem`を探すと、Nの自分自身のコメントまで
+ *   （外側の親スレッドの返信欄が祖先にあるせいで）マッチしてしまい、
+ *   「もう展開済み」と誤判定してトグルを押さなくなる。
+ *   「そのコメントから最も近い返信欄の持ち主が、このスレッドか」で直下だけに絞る。
+ *   これで自身のコメント（持ち主は親）と孫の返信（持ち主は子スレッド）が両方外れる。
+ */
+function directReplyElements(thread: Element): Element[] {
+  return qa(SELECTORS.comments.replyItem, thread).filter(
+    (reply) =>
+      reply.closest(REPLIES_CONTAINER_SELECTOR)?.closest(COMMENT_THREAD_SELECTOR) === thread
+  )
+}
+
 /** コメントのpermalinkが動画IDを持つ場合、SPA遷移中の旧動画コメントを確実に除外する。 */
 function belongsToCurrentVideo(el: Element): boolean {
   const link = q<HTMLAnchorElement>(SELECTORS.comments.published, el)
@@ -899,6 +943,15 @@ function readReplyCount(el: Element): number | undefined {
 }
 
 /**
+ * スレッドが持つ返信の件数。畳まれていれば「N件の返信」の文言から、
+ * メイン画面側で既に展開されていれば（文言から数字が消えるため）直下の返信の実数から取る。
+ * 返信欄を持たない要素（裸の返信など）では undefined。
+ */
+function readThreadReplyCount(thread: Element): number | undefined {
+  return readReplyCount(thread) ?? (directReplyElements(thread).length || undefined)
+}
+
+/**
  * 新規コメント/返信の共通投稿処理。
  * 入力欄はcontenteditableなdivで、Reactの制御コンポーネントのように
  * textContentを直接書き換えるだけではYouTube側の内部状態（投稿ボタンの活性化）が
@@ -955,14 +1008,24 @@ async function submitCommentBox(box: Element, text_: string): Promise<boolean> {
  *   表示されていた（投稿自体は成功しているのに失敗したように見える）。
  */
 async function loadRepliesFor(commentId: string): Promise<FeedItem[]> {
-  const el = findCommentElementById(commentId)
-  if (!el) return []
+  // ★ トップレベルでも返信でも、「自身の返信欄を持つスレッド要素」に揃えてから扱う。
+  //   返信への返信（新スレッドUI）はこれだけで再帰的に読めるようになる。
+  //   要素の参照はSPA遷移や再描画で容易に無効になるため、毎回idから引き直す。
+  const findOwnThread = () => {
+    const el = findCommentElementById(commentId)
+    return el ? resolveOwnThread(el) : null
+  }
+
+  const thread = findOwnThread()
+  if (!thread) return [] // 見つからない、または返信欄を持たない（旧UIの裸の返信）
 
   // ★ 既に展開済みのスレッドでトグルを押すと畳んでしまうため、
   //   返信がDOMに出ていない場合だけクリックする。
-  const alreadyLoaded = qa(SELECTORS.comments.replyItem, el).length > 0
+  //   件数は必ず「直下の返信」で数える。孫の返信や自身のコメントを数えてしまうと、
+  //   まだ何も展開していないのに「展開済み」と誤判定する。
+  const alreadyLoaded = directReplyElements(thread).length > 0
   if (!alreadyLoaded) {
-    const toggle = q<HTMLElement>(SELECTORS.comments.replyToggle, el)
+    const toggle = q<HTMLElement>(SELECTORS.comments.replyToggle, thread)
     if (toggle && !toggle.matches(":disabled, [disabled], [aria-disabled='true']")) {
       toggle.click()
     }
@@ -971,21 +1034,27 @@ async function loadRepliesFor(commentId: string): Promise<FeedItem[]> {
     // メイン画面を実際にスクロールしない前提のこの拡張では自然には交差しないため、
     // 短い間隔で様子を見ながらnudgeIntoViewportで刺激する（他機能に合わせて700ms間隔）。
     for (let attempt = 0; attempt < 6; attempt++) {
-      const target = findCommentElementById(commentId)
+      const target = findOwnThread()
       const continuation = target && q<HTMLElement>(SELECTORS.comments.repliesContinuation, target)
       if (continuation) nudgeIntoViewport(continuation, () => {}, 700)
       await new Promise((resolve) => window.setTimeout(resolve, 700))
-      const refreshed = findCommentElementById(commentId)
-      if (refreshed && qa(SELECTORS.comments.replyItem, refreshed).length > 0) break
+      const refreshed = findOwnThread()
+      if (refreshed && directReplyElements(refreshed).length > 0) break
     }
   }
 
-  const parent = findCommentElementById(commentId)
+  const parent = findOwnThread()
   if (!parent) return []
   const items: FeedItem[] = []
-  for (const replyEl of qa(SELECTORS.comments.replyItem, parent)) {
+  for (const replyEl of directReplyElements(parent)) {
     const item = parseCommentThread(replyEl)
-    if (item) items.push({ ...item, parentId: commentId })
+    if (!item) continue
+    // 返信が自分の返信欄を持つ（＝新スレッドUIで包まれている）なら、その件数は
+    // view-modelではなく包んでいるスレッド側にある。parseCommentThread()はview-modelしか
+    // 見ないので、ここで補ってサブ画面に「返信 N件」のトグルを出せるようにする。
+    const ownThread = resolveOwnThread(replyEl)
+    const nestedCount = ownThread && ownThread !== parent ? readThreadReplyCount(ownThread) : undefined
+    items.push({ ...item, parentId: commentId, ...(nestedCount ? { replyCount: nestedCount } : {}) })
   }
   return items
 }
@@ -996,7 +1065,9 @@ function parseCommentThread(el: Element): FeedItem | null {
   if (!id) return null // 内容未設定のskeletonはコメントとして配信・キャッシュしない
   const likeButton = q<HTMLElement>(SELECTORS.comments.likeButton, el)
   const likeCount = readLikeCount(el)
-  const replyCount = readReplyCount(el)
+  // スレッド要素なら件数が取れる。返信のview-modelでは自身の返信欄を持たないので
+  // undefinedになり、loadRepliesFor()側で包んでいるスレッドから補う。
+  const replyCount = readThreadReplyCount(el)
   const pinnedLabel = text(SELECTORS.comments.pinnedBadge, el)
   return {
     // permalinkのlc、またはDOM内容由来のfallback hashを安定キーにする。
