@@ -1604,6 +1604,33 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
   // （自分で返信を投稿した直後は元のreplyCountが古くなるため）
   const displayReplyCount = replies ? replies.length : item.replyCount
 
+  // ★ 返信の先読み。行が画面内に入ったら、開かれる前にメイン側で返信を展開して
+  //   アイコンまで準備しておく（返信のアイコンURLは YouTube が返信を描画して初めて現れるため）。
+  //   IntersectionObserver は root: null でも、スクロール容器で隠れている行を「交差していない」と
+  //   判定するので、対象は「今見えている行」だけに収まる（D-23 のスクロール連動の範囲内）。
+  //   直列化と重複排除は CS 側（prefetch: true）が行う。
+  const rowRef = useRef<HTMLLIElement | null>(null)
+  const prefetchedRef = useRef(false)
+  useEffect(() => {
+    if (tabId === null || prefetchedRef.current) return
+    if (replies !== null || !displayReplyCount) return
+    const el = rowRef.current
+    if (!el || typeof IntersectionObserver === "undefined") return
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return
+      observer.disconnect()
+      prefetchedRef.current = true
+      void (async () => {
+        const res = await askContent(tabId, "COMMENT_LOAD_REPLIES", { commentId: item.id, prefetch: true })
+        if (isErr(res) || res.data.items.length === 0) return
+        // クリックで先に取れていたらそちらを優先。空（失敗）なら先読み結果で埋める
+        setReplies((prev) => (prev && prev.length > 0 ? prev : res.data.items))
+      })()
+    }, { rootMargin: "200px 0px" })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [tabId, replies, displayReplyCount, item.id])
+
   const toggleReplies = async () => {
     if (repliesOpen) {
       setRepliesOpen(false)
@@ -1665,6 +1692,7 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
 
   return (
     <li
+      ref={rowRef}
       style={{ contentVisibility: "auto", containIntrinsicSize: "84px" }}
       className={`flex gap-2.5 border-b border-neutral-950 px-4 py-2 last:border-0 ${isReply ? "bg-neutral-950/40" : ""}`}>
       <div className="h-7 w-7 shrink-0 overflow-hidden rounded-full bg-neutral-800">

@@ -146,7 +146,13 @@ export type Contract = {
   // 展開済みならクリックせずそのまま読み出す（誤って畳んでしまわないため）。
   // ★ 空で返すときは reason を添える。Popout は「返信を取得できませんでした（timeout）」の
   //   ように表示し、次にクリックされたら再取得する（空を最終結果として記憶しない）。
-  COMMENT_LOAD_REPLIES: { req: { commentId: string }; res: { items: FeedItem[]; reason?: ReplyLoadFailure } }
+  // ★ prefetch: true は「サブ画面で行が見えたので先回りして準備する」要求。CS側は先読みを
+  //   1件ずつ直列に処理し（並走すると continuation の nudge が祖先スタイルを取り合う）、
+  //   ユーザーのクリック（prefetch なし）は待たずに即実行、同じidが処理中なら結果を共有する。
+  COMMENT_LOAD_REPLIES: {
+    req: { commentId: string; prefetch?: boolean }
+    res: { items: FeedItem[]; reason?: ReplyLoadFailure }
+  }
   // 新規コメントの投稿。成功すればコメント本体の自動監視(FEED_APPEND)が
   // 自然に新着として拾うため、ここでは成否だけ返す。
   COMMENT_POST: { req: { text: string };              res: { ok: boolean } }

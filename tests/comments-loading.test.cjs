@@ -352,3 +352,42 @@ test("reply avatars that fill after the response reach the sub window as REPLY_A
   const again = await h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:parent" })
   assert.equal(Array.from(again.items).find((item) => item.id === "lc:parent.r1").avatarUrl, "https://yt3.ggpht.com/r1.jpg")
 })
+
+// 先読み（prefetch: true）は直列。並走すると continuation の nudge が祖先スタイルを取り合う。
+function stubReplyLoadingFor(h, thread, delayMs, replies) {
+  const button = thread.querySelector("#more-replies-sub-thread button")
+  let clicks = 0
+  button.addEventListener("click", () => {
+    clicks += 1
+    h.win.setTimeout(() => {
+      thread.querySelector("ytd-comment-replies-renderer")
+        .insertAdjacentHTML("beforeend", `<div id="expanded-threads">${replies}</div>`)
+    }, delayMs)
+  })
+  return () => clicks
+}
+
+test("reply prefetches run one thread at a time, and a click shares an in-flight load", async (t) => {
+  const h = setup(t, section(threadWithReplies("a", 1) + threadWithReplies("b", 1)))
+  h.start()
+  const [ta, tb] = h.doc.querySelectorAll("ytd-comment-thread-renderer")
+  const clicksA = stubReplyLoadingFor(h, ta, 3000, wrappedReply("a.r1"))
+  const clicksB = stubReplyLoadingFor(h, tb, 3000, wrappedReply("b.r1"))
+
+  const pa = h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:a", prefetch: true })
+  const pb = h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:b", prefetch: true })
+  await h.advance(1000)
+  assert.equal(clicksA(), 1, "the first prefetch starts immediately")
+  assert.equal(clicksB(), 0, "the second prefetch waits for the first to finish")
+
+  await h.advance(4000)
+  assert.deepEqual(Array.from((await pa).items, (item) => item.id), ["lc:a.r1"])
+  assert.equal(clicksB(), 1, "the second prefetch starts once the first is done")
+
+  // 先読み中のスレッドをユーザーがクリック → 二重にトグルを押さず、同じ結果を待つ
+  const click = h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:b" })
+  await h.advance(4000)
+  assert.deepEqual(Array.from((await click).items, (item) => item.id), ["lc:b.r1"])
+  assert.deepEqual(Array.from((await pb).items, (item) => item.id), ["lc:b.r1"])
+  assert.equal(clicksB(), 1, "a toggle is never clicked twice (that would collapse the thread)")
+})

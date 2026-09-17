@@ -1039,16 +1039,47 @@ const REPLY_LOAD_ATTEMPTS = 10
 const REPLY_LOAD_INTERVAL_MS = 700
 
 async function loadRepliesFor(commentId: string): Promise<FeedItem[]> {
-  return (await loadRepliesDetailed(commentId)).items
+  return (await loadRepliesShared(commentId)).items
+}
+
+type ReplyLoadResult = { items: FeedItem[]; reason?: ReplyLoadFailure }
+
+/** 処理中の返信読み込み。同じidを同時に二重実行しない（トグルを2回押すと畳んでしまう）。 */
+const replyLoadsInFlight = new Map<string, Promise<ReplyLoadResult>>()
+/** 先読みの直列化。「開始」だけを直列にし、ユーザーのクリックはこの列を待たない。 */
+let replyPrefetchChain: Promise<unknown> = Promise.resolve()
+
+function loadRepliesShared(commentId: string): Promise<ReplyLoadResult> {
+  const inFlight = replyLoadsInFlight.get(commentId)
+  if (inFlight) return inFlight
+  const run = loadRepliesDetailed(commentId).finally(() => replyLoadsInFlight.delete(commentId))
+  replyLoadsInFlight.set(commentId, run)
+  return run
+}
+
+/**
+ * サブ画面で行が見えたときの先回り読み込み。1件ずつ順番に実行する。
+ * ★ 並走させると、各スレッドの continuation を nudgeIntoViewport() で刺激する処理が
+ *   共有の祖先スタイルを取り合い、復元が壊れる（avatar の nudge 連鎖を1本に制限した理由と同じ）。
+ *   クリックされたスレッドが先読み待ちでも、クリック側は即座に開始し、先読み側は
+ *   後から同じ結果（既に展開済み → 即返却）を得る。
+ */
+function prefetchReplies(commentId: string): Promise<ReplyLoadResult> {
+  const inFlight = replyLoadsInFlight.get(commentId)
+  if (inFlight) return inFlight
+  const run = replyPrefetchChain.then(() => {
+    if (ports.size === 0) return { items: [], reason: "not-found" as const }
+    return loadRepliesShared(commentId)
+  })
+  replyPrefetchChain = run.catch(() => undefined)
+  return run
 }
 
 /**
  * 返信一覧と、空だった場合の理由を返す。理由はPopoutがそのまま表示し、
  * 「なぜ取れなかったか」を切り分けられるようにする（診断機能と同じ思想）。
  */
-async function loadRepliesDetailed(
-  commentId: string
-): Promise<{ items: FeedItem[]; reason?: ReplyLoadFailure }> {
+async function loadRepliesDetailed(commentId: string): Promise<ReplyLoadResult> {
   // ★ トップレベルでも返信でも、「自身の返信欄を持つスレッド要素」に揃えてから扱う。
   //   返信への返信（新スレッドUI）はこれだけで再帰的に読めるようになる。
   //   要素の参照はSPA遷移や再描画で容易に無効になるため、毎回idから引き直す。
@@ -2470,7 +2501,8 @@ registerHandlers({
       ...(likeCount !== undefined ? { likeCount } : {})
     }
   },
-  COMMENT_LOAD_REPLIES: async ({ commentId }) => loadRepliesDetailed(commentId),
+  COMMENT_LOAD_REPLIES: async ({ commentId, prefetch }) =>
+    prefetch ? prefetchReplies(commentId) : loadRepliesShared(commentId),
   COMMENT_POST: async ({ text: body }) => {
     const videoId = getVideoId()
     const container = findCommentSection(videoId)
