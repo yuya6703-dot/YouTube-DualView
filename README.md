@@ -54,8 +54,9 @@ pnpm dev
 | `pnpm dev` | 開発サーバー起動（差分ビルド） |
 | `pnpm build` | 本番ビルド（`build/chrome-mv3-prod`） |
 | `pnpm typecheck` | 型検査のみ |
+| `pnpm test` | コメント読み込みの回帰テスト（jsdom上で実際のコンテンツスクリプトを実行） |
 | `pnpm package` | 配布用zip（`build/chrome-mv3-prod.zip`） |
-| `pnpm verify` | 型検査 + peer依存検査 + 本番ビルド + 本番依存の脆弱性監査（CIと同一） |
+| `pnpm verify` | 型検査 + 回帰テスト + peer依存検査 + 本番ビルド + 本番依存の脆弱性監査（CIと同一） |
 
 ## 非表示にしている機能
 
