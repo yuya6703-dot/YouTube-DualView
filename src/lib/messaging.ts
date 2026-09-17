@@ -43,6 +43,15 @@ export interface QueueItem {
   duration: number     // 秒。取得不能時は 0
 }
 
+/**
+ * 返信を空で返したときの理由。診断用の短いコードで、Popout がそのまま画面に出す。
+ * - not-found:       指定idのコメントが現在のコメント欄に見つからない
+ * - no-reply-thread: 見つかったが自身の返信欄を持たない（旧UIの包まれていない返信）
+ * - no-toggle:       展開ボタンが見つからず、返信も現れなかった
+ * - timeout:         展開したが、待ち時間内に返信が現れなかった（YouTube側の遅延）
+ */
+export type ReplyLoadFailure = "not-found" | "no-reply-thread" | "no-toggle" | "timeout"
+
 export interface TimestampNote {
   id: string
   videoId: string
@@ -134,8 +143,10 @@ export type Contract = {
   // 反映されない場合も、見た目と実態が食い違わないようにするため）
   COMMENT_TOGGLE_LIKE: { req: { commentId: string };  res: { liked: boolean; likeCount?: number } }
   // 返信欄を開く。メイン画面でまだ展開されていなければクリックして展開させ、
-  // 展開済みならクリックせずそのまま読み出す（誤って畳んでしまわないため）
-  COMMENT_LOAD_REPLIES: { req: { commentId: string }; res: { items: FeedItem[] } }
+  // 展開済みならクリックせずそのまま読み出す（誤って畳んでしまわないため）。
+  // ★ 空で返すときは reason を添える。Popout は「返信を取得できませんでした（timeout）」の
+  //   ように表示し、次にクリックされたら再取得する（空を最終結果として記憶しない）。
+  COMMENT_LOAD_REPLIES: { req: { commentId: string }; res: { items: FeedItem[]; reason?: ReplyLoadFailure } }
   // 新規コメントの投稿。成功すればコメント本体の自動監視(FEED_APPEND)が
   // 自然に新着として拾うため、ここでは成否だけ返す。
   COMMENT_POST: { req: { text: string };              res: { ok: boolean } }

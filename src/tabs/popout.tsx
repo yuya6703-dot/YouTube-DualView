@@ -1594,6 +1594,8 @@ function CommentRow({ item, size, tabId, t, settings, isReply = false }: {
   const [repliesOpen, setRepliesOpen] = useState(false)
   const [replies, setReplies] = useState<FeedItem[] | null>(null)
   const [repliesLoading, setRepliesLoading] = useState(false)
+  // 空で返ったときの理由（CS側の診断コード）。表示に添えて切り分けに使う
+  const [repliesReason, setRepliesReason] = useState<string | null>(null)
   // 読み込み済みなら実件数、未読み込みならDOM取得時点のスナップショット値を使う
   // （自分で返信を投稿した直後は元のreplyCountが古くなるため）
   const displayReplyCount = replies ? replies.length : item.replyCount
@@ -1603,7 +1605,10 @@ function CommentRow({ item, size, tabId, t, settings, isReply = false }: {
       setRepliesOpen(false)
       return
     }
-    if (replies !== null) {
+    // ★ 空の結果は最終結果として記憶しない。YouTube側の読み込みが待ち時間に間に合わなかった
+    //   だけのことがあり（2026-09-17 実機で報告）、`[]` を記憶すると以後ずっと
+    //   「取得できませんでした」のままになる。空だったときは次のクリックで再取得する。
+    if (replies !== null && replies.length > 0) {
       setRepliesOpen(true)
       return
     }
@@ -1613,6 +1618,7 @@ function CommentRow({ item, size, tabId, t, settings, isReply = false }: {
     setRepliesLoading(false)
     if (isErr(res)) return
     setReplies(res.data.items)
+    setRepliesReason(res.data.items.length === 0 ? (res.data.reason ?? null) : null)
     setRepliesOpen(true)
   }
 
@@ -1802,7 +1808,10 @@ function CommentRow({ item, size, tabId, t, settings, isReply = false }: {
           </ul>
         )}
         {repliesOpen && replies && replies.length === 0 && (
-          <p className="mt-1 pl-2 text-[11px] text-neutral-600">{t.repliesUnavailable}</p>
+          <p className="mt-1 pl-2 text-[11px] text-neutral-600">
+            {t.repliesUnavailable}
+            {repliesReason && <span className="ml-1 text-neutral-700">({repliesReason})</span>}
+          </p>
         )}
         {replyNotice && (
           <p className="mt-1 pl-2 text-[11px] text-neutral-500">{replyNotice}</p>

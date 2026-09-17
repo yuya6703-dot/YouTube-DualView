@@ -243,3 +243,83 @@ test("loading still times out with a retryable error if YouTube supplies no comm
   assert.ok(h.events.some(e => e.type === "PAGE_STATE" && e.payload.kind === "comment" && e.payload.phase === "error"))
   assert.equal(h.api.state().hasMore, true)
 })
+
+// ---- 返信の読み込み（COMMENT_LOAD_REPLIES） ----
+
+// 親コメント1件。返信は「N 件の返信」トグルの先にあり、クリック後に YouTube が非同期で
+// #expanded-threads を挿入する（新スレッドUI: 返信も ytd-comment-thread-renderer に包まれる）。
+const threadWithReplies = (id, replyCount) => `
+  <ytd-comment-thread-renderer>
+    <div id="comment-container"><ytd-comment-view-model>
+      <a id="author-text">Author</a>
+      <div id="author-thumbnail"><img src="https://yt3.ggpht.com/avatar.jpg"></div>
+      <span id="published-time-text"><a href="/watch?v=current&lc=${id}">1 day ago</a></span>
+      <div id="content-text">Comment ${id}</div>
+    </ytd-comment-view-model></div>
+    <div id="replies"><ytd-comment-replies-renderer>
+      <div id="collapsed-threads"><div id="more-replies-sub-thread"><button>${replyCount} 件の返信</button></div></div>
+    </ytd-comment-replies-renderer></div>
+  </ytd-comment-thread-renderer>`
+const wrappedReply = (id) => `
+  <ytd-comment-thread-renderer>
+    <div id="comment-container"><ytd-comment-view-model>
+      <a id="author-text">Replier</a>
+      <div id="author-thumbnail"><img src="https://yt3.ggpht.com/avatar.jpg"></div>
+      <span id="published-time-text"><a href="/watch?v=current&lc=${id}">1 day ago</a></span>
+      <div id="content-text">Reply ${id}</div>
+    </ytd-comment-view-model></div>
+    <div id="replies"></div>
+  </ytd-comment-thread-renderer>`
+
+// クリックから `delayMs` 後に返信が現れる YouTube を再現する。
+function stubReplyLoading(h, delayMs, replies) {
+  const button = h.doc.querySelector("#more-replies-sub-thread button")
+  let clicks = 0
+  button.addEventListener("click", () => {
+    clicks += 1
+    if (replies === null) return
+    h.win.setTimeout(() => {
+      h.doc.querySelector("ytd-comment-replies-renderer")
+        .insertAdjacentHTML("beforeend", `<div id="expanded-threads">${replies}</div>`)
+    }, delayMs)
+  })
+  return () => clicks
+}
+
+test("replies that YouTube renders 5 seconds after the toggle click are still returned", async (t) => {
+  const h = setup(t, section(threadWithReplies("parent", 2)))
+  h.start()
+  const clicks = stubReplyLoading(h, 5000, wrappedReply("parent.r1") + wrappedReply("parent.r2"))
+  const pending = h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:parent" })
+  await h.advance(9000)
+  const result = await pending
+  assert.equal(clicks(), 1, "the toggle is clicked exactly once")
+  assert.deepEqual(Array.from(result.items, (item) => item.id), ["lc:parent.r1", "lc:parent.r2"])
+  assert.deepEqual(Array.from(result.items, (item) => item.parentId), ["lc:parent", "lc:parent"])
+})
+
+test("already-expanded replies are returned without clicking the toggle again", async (t) => {
+  const h = setup(t, section(threadWithReplies("parent", 1)))
+  h.doc.querySelector("ytd-comment-replies-renderer")
+    .insertAdjacentHTML("beforeend", `<div id="expanded-threads">${wrappedReply("parent.r1")}</div>`)
+  h.start()
+  const clicks = stubReplyLoading(h, 0, null)
+  const pending = h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:parent" })
+  await h.advance(100)
+  const result = await pending
+  assert.equal(clicks(), 0, "an expanded thread must not be toggled (that would collapse it)")
+  assert.deepEqual(Array.from(result.items, (item) => item.id), ["lc:parent.r1"])
+})
+
+test("an empty reply result carries a reason the sub window can show", async (t) => {
+  const h = setup(t, section(threadWithReplies("parent", 3)))
+  h.start()
+  stubReplyLoading(h, 0, null) // YouTube never renders anything
+  const pending = h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:parent" })
+  await h.advance(12000)
+  const result = await pending
+  assert.equal(result.items.length, 0)
+  assert.equal(result.reason, "timeout")
+  const missing = await h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:nope" })
+  assert.equal(missing.reason, "not-found")
+})

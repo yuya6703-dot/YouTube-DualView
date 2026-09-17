@@ -16,6 +16,7 @@ import {
   type PageState,
   type PlayerStatus,
   type QueueItem,
+  type ReplyLoadFailure,
   type StreamCommand,
   type StreamEvent,
   type VideoKind
@@ -1015,7 +1016,27 @@ async function submitCommentBox(box: Element, text_: string): Promise<boolean> {
  *   スレッドが畳まれたままだと必ず0件になって「返信を取得できませんでした」と
  *   表示されていた（投稿自体は成功しているのに失敗したように見える）。
  */
+/**
+ * 展開後、返信が現れるのを待つ回数（1回 = 700ms）。
+ * ★ 2026-09-17 実機で「返信内容の情報の取得ができない」と報告。調査スクリプトでは
+ *   同じスレッドに返信が9件ちゃんと存在しており、読み取りロジックは全段階正常だった。
+ *   つまり返信はYouTube側で読み込まれたが、旧上限（6回≒4.2秒）に間に合わず空で返していた。
+ *   返信の取得はネットワーク往復なので、10回≒7秒まで待つ。
+ */
+const REPLY_LOAD_ATTEMPTS = 10
+const REPLY_LOAD_INTERVAL_MS = 700
+
 async function loadRepliesFor(commentId: string): Promise<FeedItem[]> {
+  return (await loadRepliesDetailed(commentId)).items
+}
+
+/**
+ * 返信一覧と、空だった場合の理由を返す。理由はPopoutがそのまま表示し、
+ * 「なぜ取れなかったか」を切り分けられるようにする（診断機能と同じ思想）。
+ */
+async function loadRepliesDetailed(
+  commentId: string
+): Promise<{ items: FeedItem[]; reason?: ReplyLoadFailure }> {
   // ★ トップレベルでも返信でも、「自身の返信欄を持つスレッド要素」に揃えてから扱う。
   //   返信への返信（新スレッドUI）はこれだけで再帰的に読めるようになる。
   //   要素の参照はSPA遷移や再描画で容易に無効になるため、毎回idから引き直す。
@@ -1025,34 +1046,39 @@ async function loadRepliesFor(commentId: string): Promise<FeedItem[]> {
   }
 
   const thread = findOwnThread()
-  if (!thread) return [] // 見つからない、または返信欄を持たない（旧UIの裸の返信）
+  if (!thread) {
+    // 見つからない（SPA遷移・再描画）か、返信欄を持たない（旧UIの裸の返信）
+    return { items: [], reason: findCommentElementById(commentId) ? "no-reply-thread" : "not-found" }
+  }
 
   // ★ 既に展開済みのスレッドでトグルを押すと畳んでしまうため、
   //   返信がDOMに出ていない場合だけクリックする。
   //   件数は必ず「直下の返信」で数える。孫の返信や自身のコメントを数えてしまうと、
   //   まだ何も展開していないのに「展開済み」と誤判定する。
   const alreadyLoaded = directReplyElements(thread).length > 0
+  let toggled = alreadyLoaded
   if (!alreadyLoaded) {
     const toggle = q<HTMLElement>(SELECTORS.comments.replyToggle, thread)
     if (toggle && !toggle.matches(":disabled, [disabled], [aria-disabled='true']")) {
       toggle.click()
+      toggled = true
     }
     // 展開ボタンを押しても、返信本体はcontinuation-item-renderer側の
     // IntersectionObserverで別途遅延読み込みされる（related動画/コメント本体と同じ罠）。
     // メイン画面を実際にスクロールしない前提のこの拡張では自然には交差しないため、
     // 短い間隔で様子を見ながらnudgeIntoViewportで刺激する（他機能に合わせて700ms間隔）。
-    for (let attempt = 0; attempt < 6; attempt++) {
+    for (let attempt = 0; attempt < REPLY_LOAD_ATTEMPTS; attempt++) {
       const target = findOwnThread()
       const continuation = target && q<HTMLElement>(SELECTORS.comments.repliesContinuation, target)
       if (continuation) nudgeIntoViewport(continuation, () => {}, 700)
-      await new Promise((resolve) => window.setTimeout(resolve, 700))
+      await new Promise((resolve) => window.setTimeout(resolve, REPLY_LOAD_INTERVAL_MS))
       const refreshed = findOwnThread()
       if (refreshed && directReplyElements(refreshed).length > 0) break
     }
   }
 
   const parent = findOwnThread()
-  if (!parent) return []
+  if (!parent) return { items: [], reason: "not-found" }
   const items: FeedItem[] = []
   for (const replyEl of directReplyElements(parent)) {
     const item = parseCommentThread(replyEl)
@@ -1064,7 +1090,8 @@ async function loadRepliesFor(commentId: string): Promise<FeedItem[]> {
     const nestedCount = ownThread && ownThread !== parent ? readThreadReplyCount(ownThread) : undefined
     items.push({ ...item, parentId: commentId, ...(nestedCount ? { replyCount: nestedCount } : {}) })
   }
-  return items
+  if (items.length === 0) return { items, reason: toggled ? "timeout" : "no-toggle" }
+  return { items }
 }
 
 function parseCommentThread(el: Element): FeedItem | null {
@@ -2395,7 +2422,7 @@ registerHandlers({
       ...(likeCount !== undefined ? { likeCount } : {})
     }
   },
-  COMMENT_LOAD_REPLIES: async ({ commentId }) => ({ items: await loadRepliesFor(commentId) }),
+  COMMENT_LOAD_REPLIES: async ({ commentId }) => loadRepliesDetailed(commentId),
   COMMENT_POST: async ({ text: body }) => {
     const videoId = getVideoId()
     const container = findCommentSection(videoId)
