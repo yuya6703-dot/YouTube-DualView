@@ -841,10 +841,20 @@ function resolveOwnThread(el: Element): Element | null {
  *   これで自身のコメント（持ち主は親）と孫の返信（持ち主は子スレッド）が両方外れる。
  */
 function directReplyElements(thread: Element): Element[] {
-  return qa(SELECTORS.comments.replyItem, thread).filter(
+  const all = qa(SELECTORS.comments.replyItem, thread)
+  const direct = all.filter(
     (reply) =>
       reply.closest(REPLIES_CONTAINER_SELECTOR)?.closest(COMMENT_THREAD_SELECTOR) === thread
   )
+  if (direct.length > 0 || all.length === 0) return direct
+  // ★ 想定外のDOM世代への保険（返信の容れ物が #replies/#expanded-threads 以外など）。
+  //   返信のview-modelは見つかるのに直下判定が1件も通らない場合、ここで空を返すと
+  //   「展開済みでない」と誤認して展開済みスレッドのトグルを押して畳んでしまい、
+  //   さらに「返信を取得できませんでした」になる（既存機能の退行）。
+  //   その場合は v57 以前と同じ平坦な一覧に退化させる。ただしスレッド自身のコメント
+  //   （`#comment-container` 配下）だけは除外し、入れ子スレッドで自分を返信に数えない。
+  const own = thread.querySelector(":scope > #comment-container")
+  return own ? all.filter((reply) => !own.contains(reply)) : all
 }
 
 /** コメントのpermalinkが動画IDを持つ場合、SPA遷移中の旧動画コメントを確実に除外する。 */
@@ -1452,24 +1462,27 @@ function flushCommentEmit() {
 
 /** terminal確定後にcontinuationが遅れて現れた場合、自動ページングを再開する。 */
 function reviveCommentPagingIfAvailable() {
+  // ★ 1秒間隔の保険処理から毎秒呼ばれるため、DOM走査（continuation探索・スレッド走査・
+  //   各スレッドのURL解析）の前に、安価な状態判定で大半のケースを弾く。
+  if (commentLoading) return
+  const terminal =
+    commentPageState.phase === "done" || commentPageState.phase === "error" || !commentPageState.hasMore
+  if (!terminal) return
+
   const container = commentContainerEl && document.contains(commentContainerEl)
     ? commentContainerEl
     : q(SELECTORS.comments.section)
-  if (
-    !commentLoading &&
-    findTopLevelCommentContinuation() &&
-    // ★ 終端では continuation の死骸が残り続けるため、これが無いと done が毎回 idle に戻され、
-    //   サブ画面から要求されるたびに12回の空振りと誤エラーを繰り返す。
-    !commentsReachedEnd(container) &&
-    // ★ 0件確定（チャンネルがコメントをオフ / 0件表示）でも同じ死骸が残る。
-    //   これが無いと、1秒間隔の保険処理が毎秒 done→idle に戻し、直後の loadMoreComments() が
-    //   即 done に戻すため、サブ画面の下部が「取得できるコメントはありません」と
-    //   「読み込み中」を毎秒往復する（2026-09-17 実機で報告）。tryOnce と同じ条件で見る。
-    !(currentCommentThreads().length === 0 && commentsAreDefinitelyEmpty(container)) &&
-    (commentPageState.phase === "done" || commentPageState.phase === "error" || !commentPageState.hasMore)
-  ) {
-    updatePageState(makePageState("comment", "idle", commentItemCache.size, true))
-  }
+  if (!findTopLevelCommentContinuation()) return
+  // ★ 終端では continuation の死骸が残り続けるため、これが無いと done が毎回 idle に戻され、
+  //   サブ画面から要求されるたびに12回の空振りと誤エラーを繰り返す。
+  if (commentsReachedEnd(container)) return
+  // ★ 0件確定（チャンネルがコメントをオフ / 0件表示）でも同じ死骸が残る。
+  //   これが無いと、1秒間隔の保険処理が毎秒 done→idle に戻し、直後の loadMoreComments() が
+  //   即 done に戻すため、サブ画面の下部が「取得できるコメントはありません」と
+  //   「読み込み中」を毎秒往復する（2026-09-17 実機で報告）。tryOnce と同じ条件で見る。
+  if (currentCommentThreads().length === 0 && commentsAreDefinitelyEmpty(container)) return
+
+  updatePageState(makePageState("comment", "idle", commentItemCache.size, true))
 }
 
 function scheduleCommentEmit() {
@@ -1794,12 +1807,6 @@ function loadMoreComments() {
       finish("done", false)
       return
     }
-    // ★ 終端メッセージが出ていれば、continuation の死骸が残っていても終端。
-    //   直前の nudge で最後のバッチが増えていた場合も、その増分は finish() が配信する。
-    if (commentsReachedEnd(currentContainer)) {
-      finish("done", false)
-      return
-    }
     const grew = threads.length > beforeCount || threads.some((thread) => {
       const id = getStableCommentId(thread)
       return id !== null && !beforeIds.has(id)
@@ -1809,10 +1816,23 @@ function loadMoreComments() {
       finish("idle", true)
       return
     }
+    // ★ 終端メッセージが出ていれば、continuation の死骸が残っていても終端として done にする
+    //   （放置すると12回nudgeした末に誤エラーになる）。
+    //   ただし**先頭では判定しない**。この注記を一覧の末尾に常設する世代があった場合、
+    //   初回バッチ直後に終端と誤認して21件目以降を読み込めなくなる。continuation を
+    //   1回刺激して約3秒待っても増えない（attempts が 3 に達する）ときに終端と判断する。
+    //   同一要素への再刺激は3秒に1回に抑えられているため、この間の刺激は1回。
+    if (attempts >= 3 && commentsReachedEnd(currentContainer)) {
+      finish("done", false)
+      return
+    }
 
     const continuation = findTopLevelCommentContinuation()
     if (attempts >= 12) {
-      if (!continuation && (threads.length > 0 || commentsAreDefinitelyEmpty(currentContainer))) {
+      if (
+        (!continuation && (threads.length > 0 || commentsAreDefinitelyEmpty(currentContainer))) ||
+        commentsReachedEnd(currentContainer)
+      ) {
         finish("done", false)
       }
       else finish("error", true, "コメントを読み込めませんでした。再試行してください。")
