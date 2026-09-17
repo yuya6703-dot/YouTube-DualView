@@ -1152,10 +1152,22 @@ function parseCommentThread(el: Element): FeedItem | null {
  *   遅延読み込みのIntersectionObserverが張られているのはホスト側であり、内側の`<img>`だけを
  *   `position:fixed`で動かしてもホストは画面外のままなので、v43は空振りしていたと考えられる。
  */
+/**
+ * 読み直しのタイミング。最初の1回（600ms）は「画面内にあって自然に埋まった分」を拾うため、
+ * 残りは保険。★ nudge は**最初の読み直しの直後**に始める（末尾ではない）。
+ * 真因が遅延読み込み（画面内に入るまで永久に埋まらない）と分かった以上、8秒待ってから
+ * 動き出すのは無駄で、40件なら 8秒＋40×0.7秒 ≒ 36秒かかっていた
+ * （2026-09-17「アイコンの読み込みが遅い」と報告）。末尾の読み直しでまだ空なら2回目のnudgeを許す。
+ */
 const AVATAR_BACKFILL_DELAYS_MS = [600, 1800, 4000, 8000] as const
 const AVATAR_FILL_DEBOUNCE_MS = 200
-/** 他のnudge利用箇所（continuation等）と同じ滞在時間。短くするとIO評価に載らないことがある。 */
-const AVATAR_NUDGE_DWELL_MS = 700
+/**
+ * nudge の滞在時間。IntersectionObserver は要素が画面内に入った次の描画フレームで発火し、
+ * `src` の代入は即時（画像のダウンロードはその後、要素を戻しても続く）。
+ * continuation の 700ms はネットワーク往復を待つためのもので、アイコンには不要。
+ * 40ms では IO 評価に載らないことがあった（PROJECT.md 参照）ため、余裕を見て 250ms。
+ */
+const AVATAR_NUDGE_DWELL_MS = 250
 
 function normalizeCommentAvatarUrl(raw: string | null | undefined): string {
   const value = raw?.trim().replace(/^['"]|['"]$/g, "")
@@ -1416,13 +1428,17 @@ function scheduleAvatarBackfill(threads: Element[], rescheduleExisting = false) 
   // 世代を進める。古いDOM用タイマーが現在のpending集合へ触れないようにする。
   const generation = avatarNudgeGeneration
   AVATAR_BACKFILL_DELAYS_MS.forEach((delay, index) => {
+    const isFirst = index === 0
     const isLast = index === AVATAR_BACKFILL_DELAYS_MS.length - 1
     window.setTimeout(() => {
       if (generation !== avatarNudgeGeneration) return
       flushPendingAvatars()
-      // 待つだけでは埋まらないと確定した分だけ、能動的に読み込ませにいく。
-      if (isLast) {
+      // 最初の読み直しで空のものは画面外＝待っても埋まらないので、すぐ能動的に読み込ませにいく。
+      // 末尾の読み直しでまだ空なら、1回限りの制限を解いて2回目を許す（DOM差し替え等で
+      // 1回目が空振りした分の救済）。
+      if (isFirst || isLast) {
         const remaining = [...scheduledIds].filter((id) => pendingAvatarIds.has(id))
+        if (isLast) for (const id of remaining) avatarNudgedIds.delete(id)
         if (remaining.length > 0) enqueueAvatarNudge(remaining)
       }
     }, delay)
