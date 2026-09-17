@@ -39,6 +39,7 @@ import {
   type TimestampNote
 } from "~lib/messaging"
 import { translateText } from "~lib/deepl"
+import { FEATURES } from "~lib/features"
 import { getDictionary, type Dictionary } from "~lib/i18n"
 import { DIAGNOSE_VERSION } from "~lib/selectors"
 import { usePlayerPort, useSmoothTime, type ConnState } from "~lib/usePlayerPort"
@@ -448,6 +449,9 @@ export default function Popout() {
     const wasEnded = prevEndedRef.current
     prevEndedRef.current = ended
     if (!ended || wasEnded) return
+    // キュー機能を隠している間は動かさない。保存済みのキューが残っていると、
+    // 見えないキューが動画終了時にページ遷移を起こしてしまう。
+    if (!FEATURES.queue) return
     if (!settings.autoPlayNext) return
     const next = queue[0]
     if (next) void playFromQueue(next)
@@ -985,7 +989,9 @@ export default function Popout() {
               )}
             </section>
 
-            {/* 次に再生キュー —— Phase 2: 関連動画から追加、ドラッグで並べ替え、動画終了で自動再生 */}
+            {/* 次に再生キュー —— Phase 2: 関連動画から追加、ドラッグで並べ替え、動画終了で自動再生
+                ★ 2026-09-17 FEATURES.queue で非表示（features.ts 参照）。コードと保存データは残す */}
+            {FEATURES.queue && (
             <section className="mt-6 rounded-lg border border-neutral-800">
               <button
                 onClick={() => setQueueOpen((v) => !v)}
@@ -1008,8 +1014,11 @@ export default function Popout() {
                 <QueueList queue={queue} onPlay={playFromQueue} onRemove={removeFromQueue} onReorder={reorderQueue} t={t} />
               )}
             </section>
+            )}
 
-            {/* タイムスタンプメモ —— Phase 2: 現在の再生位置にメモを残し、クリックでジャンプする */}
+            {/* タイムスタンプメモ —— Phase 2: 現在の再生位置にメモを残し、クリックでジャンプする
+                ★ 2026-09-17 FEATURES.notes で非表示（features.ts 参照）。メモ本文は storage に残る */}
+            {FEATURES.notes && (
             <section className="mt-6 rounded-lg border border-neutral-800">
               <div className="flex items-center justify-between gap-3 px-4 py-3">
                 <button
@@ -1089,6 +1098,7 @@ export default function Popout() {
                 </ul>
               )}
             </section>
+            )}
 
             {/* コメント —— Phase 1: DOMを自動監視して流れてくる。装飾UI(絵文字トークン等)はPhase 2 */}
             <section className="mt-6 rounded-lg border border-neutral-800">
@@ -1327,13 +1337,15 @@ function RelatedRow({ item, size, onPlay, onQueue, t }: {
           <p className={`truncate text-neutral-500 ${cls.channel}`}>{item.channelName || "—"}</p>
         </div>
       </button>
-      <button
-        onClick={() => onQueue(item)}
-        title={t.addToQueue}
-        aria-label={t.addToQueue}
-        className="shrink-0 self-center rounded p-1.5 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300">
-        <ListPlus size={16} />
-      </button>
+      {FEATURES.queue && (
+        <button
+          onClick={() => onQueue(item)}
+          title={t.addToQueue}
+          aria-label={t.addToQueue}
+          className="shrink-0 self-center rounded p-1.5 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300">
+          <ListPlus size={16} />
+        </button>
+      )}
     </li>
   )
 }

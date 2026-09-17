@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from "react"
 import { DEEPL_TARGET_LANGS } from "~lib/deepl"
+import { FEATURES } from "~lib/features"
 import { getDictionary } from "~lib/i18n"
 import {
   DEFAULT_RELATED_DISPLAY_SIZE,
@@ -193,12 +194,14 @@ export default function Options() {
           </Field>
         </Section>
 
-        {/* 自動再生 */}
-        <Section title={t.sectionAutoplay}>
-          <Field label={t.autoPlayNextLabel} hint={t.autoPlayNextHint}>
-            <Toggle checked={settings.autoPlayNext} onChange={(v) => update({ autoPlayNext: v })} />
-          </Field>
-        </Section>
+        {/* 自動再生 —— キュー専用の設定なので、キュー機能を隠している間は項目ごと隠す（features.ts） */}
+        {FEATURES.queue && (
+          <Section title={t.sectionAutoplay}>
+            <Field label={t.autoPlayNextLabel} hint={t.autoPlayNextHint}>
+              <Toggle checked={settings.autoPlayNext} onChange={(v) => update({ autoPlayNext: v })} />
+            </Field>
+          </Section>
+        )}
 
         <Section title={t.related}>
           <Field label={t.displaySizeLabel} hint={t.displaySizeHint}>
