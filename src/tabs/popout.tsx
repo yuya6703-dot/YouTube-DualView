@@ -1601,8 +1601,11 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
   // 空で返ったときの理由（CS側の診断コード）。表示に添えて切り分けに使う
   const [repliesReason, setRepliesReason] = useState<string | null>(null)
   // 読み込み済みなら実件数、未読み込みならDOM取得時点のスナップショット値を使う
-  // （自分で返信を投稿した直後は元のreplyCountが古くなるため）
-  const displayReplyCount = replies ? replies.length : item.replyCount
+  // （自分で返信を投稿した直後は元のreplyCountが古くなるため）。
+  // ★ 空で返った結果（取得失敗）は「読み込み済み」に含めない。0件として扱うと
+  //   「返信 N件」のトグル自体が消えて再取得できなくなる（v63 の再クリック再取得が成立しない）。
+  const repliesLoaded = replies !== null && replies.length > 0
+  const displayReplyCount = repliesLoaded ? replies.length : item.replyCount
 
   // ★ 返信の先読み。行が画面内に入ったら、開かれる前にメイン側で返信を展開して
   //   アイコンまで準備しておく（返信のアイコンURLは YouTube が返信を描画して初めて現れるため）。
@@ -1632,15 +1635,12 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
   }, [tabId, replies, displayReplyCount, item.id])
 
   const toggleReplies = async () => {
-    if (repliesOpen) {
-      setRepliesOpen(false)
-      return
-    }
     // ★ 空の結果は最終結果として記憶しない。YouTube側の読み込みが待ち時間に間に合わなかった
     //   だけのことがあり（2026-09-17 実機で報告）、`[]` を記憶すると以後ずっと
-    //   「取得できませんでした」のままになる。空だったときは次のクリックで再取得する。
-    if (replies !== null && replies.length > 0) {
-      setRepliesOpen(true)
+    //   「取得できませんでした」のままになる。空だったとき（失敗表示中でも）は
+    //   次のクリック1回で再取得する。開閉だけの切り替えは読み込み済みのときに限る。
+    if (repliesLoaded) {
+      setRepliesOpen(!repliesOpen)
       return
     }
     if (tabId === null || repliesLoading) return
