@@ -23,18 +23,18 @@
 ### 日本語
 
 ```
-メイン画面でYouTubeを全画面再生したまま、サブモニターから関連動画・コメント・検索・再生キューを操作できます。
+メイン画面でYouTubeを全画面再生したまま、サブモニターから関連動画・コメント・検索を操作できます。
 ```
 
-（56文字）
+（50文字）
 
 ### English
 
 ```
-Watch YouTube fullscreen on one monitor while browsing related videos, comments, search, and a play queue from another.
+Watch YouTube fullscreen on one monitor while browsing related videos, comments, and search from another.
 ```
 
-（118 characters）
+（104 characters）
 
 ---
 
@@ -58,15 +58,12 @@ Watch YouTube fullscreen on one monitor while browsing related videos, comments,
 　全画面表示のまま動画を切り替えられます
 
 ・コメント
-　スクロールするだけで続きを自動読み込み。返信の表示、いいね、
-　新規コメントの投稿、返信の投稿にも対応
+　スクロールするだけで最後まで自動読み込み。返信とその返信の表示、いいね、
+　新規コメントの投稿、返信の投稿、長いコメントの折りたたみ、固定コメントの表示に対応
 　コメント内のURLはクリックで別タブに開き、タイムスタンプはその位置へジャンプします
 
-・次に再生キュー
-　見たい動画を追加し、ドラッグで並べ替え。動画が終わると自動で次を再生
-
-・タイムスタンプメモ
-　再生位置に紐づくメモを残し、クリックでその位置へジャンプ
+・コメント翻訳（任意）
+　自分のDeepL APIキーを設定すると、コメントごとに翻訳と原文を切り替えられます
 
 ・検索
 　サブ画面から検索し、メイン画面に結果を表示
@@ -77,7 +74,7 @@ Watch YouTube fullscreen on one monitor while browsing related videos, comments,
 
 ■ プライバシー
 
-この拡張機能は利用状況の収集やアクセス解析を行いません。設定・キュー・メモは
+この拡張機能は利用状況の収集やアクセス解析を行いません。設定は
 あなたのブラウザ内にのみ保存されます。任意のコメント翻訳機能を設定した場合だけ、
 「翻訳」を押したコメント本文・翻訳先言語・APIキーをDeepLへ直接送信します。
 自動送信・一括送信は行いません。サブ画面から投稿したコメントと返信は、
@@ -114,16 +111,14 @@ the video or leave fullscreen.
 　main screen stays fullscreen while switching videos
 
 ・Comments
-　Scroll to load more automatically. View replies, like comments, post new
-　comments, and post replies.
+　Scroll to load everything automatically. View replies and replies to
+　replies, like comments, post new comments and replies, collapse long
+　comments, and see pinned comments.
 　URLs in comments open in a new tab; timestamps jump the main video there
 
-・Up-next queue
-　Add videos, reorder by dragging, and play the next one automatically when
-　the current video ends
-
-・Timestamp notes
-　Save notes tied to a playback position and click to jump back to it
+・Comment translation (optional)
+　Set your own DeepL API key to switch any comment between translation and
+　the original
 
 ・Search
 　Search from the sub window and show results on the main screen
@@ -134,8 +129,8 @@ the video or leave fullscreen.
 
 ■ Privacy
 
-This extension does not collect usage analytics. Your settings, queue, and
-notes are stored only inside your browser. If you configure the optional
+This extension does not collect usage analytics. Your settings are stored
+only inside your browser. If you configure the optional
 comment translation feature, only the comment you choose to translate, the
 target language, and your API key are sent directly to DeepL. Nothing is sent
 automatically or in bulk. Comments and replies composed in the Popout are sent
@@ -163,15 +158,15 @@ https://github.com/yuya6703-dot/YouTube-DualView
 ### `storage`
 
 ```
-ユーザーの設定（音量、再生速度の刻み幅、表示言語など）、「次に再生」キュー、
-タイムスタンプメモをブラウザ内に保存し、次回起動時に復元するために使用します。
+ユーザーの設定（音量、再生速度の刻み幅、表示言語、サブ画面の位置など）を
+ブラウザ内に保存し、次回起動時に復元するために使用します。
 翻訳用APIキーと翻訳先言語だけは、ユーザーがコメントの「翻訳」を押したときに限り、
 DeepLへ直接送信されます。その他の保存データは外部へ送信しません。
 ```
 
 ```
-Used to save user settings (volume, speed step, display language), the up-next
-queue, and timestamp notes inside the browser so they persist across sessions.
+Used to save user settings (volume, speed step, display language, sub-window
+position) inside the browser so they persist across sessions.
 Only the translation API key and target language are sent externally: they go
 directly to DeepL when the user chooses to translate a comment. No other stored
 data is transmitted.
@@ -291,9 +286,8 @@ key sent to DeepL when the user explicitly requests an individual translation.
 
 1. メイン画面が全画面再生中で、サブ画面に関連動画が並んでいる様子（この拡張の主目的）
 2. コメント欄（返信の展開や投稿欄が見えている状態）
-3. 「次に再生」キューにドラッグで並べ替えできる様子
-4. タイムスタンプメモ
-5. 関連動画とコメントの半々表示
+3. 長いコメントの折りたたみと返信の返信が展開された様子
+4. 関連動画とコメントの半々表示
 
 ---
 
