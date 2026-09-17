@@ -101,11 +101,23 @@ let commentPageState = initialPageState("comment")
 let relatedPageState = initialPageState("related")
 // YouTubeが過去DOMを仮想化・再生成しても、同じ動画で取得済みの全件をPopoutへ再水和できるよう保持する。
 let commentItemCache = new Map<string, FeedItem>()
+/**
+ * COMMENT_LOAD_REPLIES で返した返信。★ commentItemCache には入れない（再接続時の再水和で
+ * 通常コメントとして流れてしまう）。用途はアイコンの補完だけ: 返信も遅延読み込みなので
+ * 応答時点では `src` が空のことが多く、後から埋まった分を REPLY_AVATAR で送り直す。
+ */
+let replyItemCache = new Map<string, FeedItem>()
 let relatedItemCache = new Map<string, QueueItem>()
 let relatedPaginationEstablished = false
 
+/** アイコン補完の対象になる項目（通常コメント／返信）を id から引く。 */
+function cachedCommentItem(id: string): FeedItem | undefined {
+  return commentItemCache.get(id) ?? replyItemCache.get(id)
+}
+
 function resetVideoCaches() {
   commentItemCache = new Map()
+  replyItemCache = new Map()
   relatedItemCache = new Map()
   relatedPaginationEstablished = false
   pendingAvatarIds = new Set()
@@ -1088,9 +1100,18 @@ async function loadRepliesDetailed(
     // 見ないので、ここで補ってサブ画面に「返信 N件」のトグルを出せるようにする。
     const ownThread = resolveOwnThread(replyEl)
     const nestedCount = ownThread && ownThread !== parent ? readThreadReplyCount(ownThread) : undefined
-    items.push({ ...item, parentId: commentId, ...(nestedCount ? { replyCount: nestedCount } : {}) })
+    // 返信も遅延読み込みなので、この時点では avatarUrl が空のことが多い。以前の取得や
+    // 後追いの補完で既に埋まっていれば、その値を引き継ぐ（再取得で空に戻さない）。
+    const known = replyItemCache.get(item.id)
+    const avatarUrl = item.avatarUrl || known?.avatarUrl || ""
+    items.push({ ...item, avatarUrl, parentId: commentId, ...(nestedCount ? { replyCount: nestedCount } : {}) })
   }
   if (items.length === 0) return { items, reason: toggled ? "timeout" : "no-toggle" }
+
+  // ★ 返信をアイコン補完の対象に登録する。通常コメントと同じ仕組み（src の変化の購読、
+  //   画面内に入れて読み込ませる nudge）に乗せ、埋まった分は REPLY_AVATAR で送り直す。
+  for (const item of items) replyItemCache.set(item.id, item)
+  scheduleAvatarBackfill(directReplyElements(parent))
   return { items }
 }
 
@@ -1238,7 +1259,7 @@ function flushPendingAvatars(): number {
 
   // DOMを触る前に、キャッシュだけで決着が付くidを外す（Map参照のみで安価）。
   for (const id of [...pendingAvatarIds]) {
-    const cached = commentItemCache.get(id)
+    const cached = cachedCommentItem(id)
     if (!cached || cached.avatarUrl) {
       pendingAvatarIds.delete(id) // 破棄済み or 既に埋まった
       pendingAvatarElements.delete(id)
@@ -1250,11 +1271,12 @@ function flushPendingAvatars(): number {
   if (!container) return pendingAvatarIds.size
 
   const filled: FeedItem[] = []
+  const filledReplies: FeedItem[] = []
   const readAvatar = (el: Element) => {
     if (pendingAvatarIds.size === 0) return
     const id = getStableCommentId(el)
     if (!id || !pendingAvatarIds.has(id)) return
-    const cached = commentItemCache.get(id)
+    const cached = cachedCommentItem(id)
     if (!cached) {
       pendingAvatarIds.delete(id)
       pendingAvatarElements.delete(id)
@@ -1263,10 +1285,17 @@ function flushPendingAvatars(): number {
     const avatarUrl = readCommentAvatarUrl(el)
     if (!avatarUrl) return
     const updated = { ...cached, avatarUrl }
-    commentItemCache.set(id, updated)
     pendingAvatarIds.delete(id)
     pendingAvatarElements.delete(id)
-    filled.push(updated)
+    // 通常コメントは feed の upsert で、返信は専用イベントで届ける（返信を FEED_APPEND に
+    // 乗せると通常コメントとして一覧に追加されてしまう）。
+    if (commentItemCache.has(id)) {
+      commentItemCache.set(id, updated)
+      filled.push(updated)
+    } else {
+      replyItemCache.set(id, updated)
+      filledReplies.push(updated)
+    }
   }
   // 要素が差し替わっていても、現在のDOMを1回走査して突き合わせる。
   for (const el of qaTopLevelThreads(container)) readAvatar(el)
@@ -1277,6 +1306,9 @@ function flushPendingAvatars(): number {
 
   if (filled.length > 0) {
     emit({ type: "FEED_APPEND", payload: { kind: "comment", items: filled } })
+  }
+  if (filledReplies.length > 0) {
+    emit({ type: "REPLY_AVATAR", payload: { items: filledReplies } })
   }
   return pendingAvatarIds.size
 }
@@ -1386,7 +1418,7 @@ function runNextAvatarNudge() {
       clearAvatarNudgeQueue()
       return
     }
-    const cached = commentItemCache.get(id)
+    const cached = cachedCommentItem(id)
     if (!cached || cached.avatarUrl) continue // 既に埋まっている・動画切り替えで破棄済み
     const el = findCommentElementById(id)
     const img = el && q<HTMLImageElement>(SELECTORS.comments.avatar, el)
@@ -1411,7 +1443,7 @@ function scheduleAvatarBackfill(threads: Element[], rescheduleExisting = false) 
   for (const el of threads) {
     const id = getStableCommentId(el)
     if (!id) continue
-    const cached = commentItemCache.get(id)
+    const cached = cachedCommentItem(id)
     if (cached !== undefined && !cached.avatarUrl) {
       const alreadyPending = pendingAvatarIds.has(id)
       const previousElement = pendingAvatarElements.get(id)

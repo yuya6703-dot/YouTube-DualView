@@ -323,3 +323,32 @@ test("an empty reply result carries a reason the sub window can show", async (t)
   const missing = await h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:nope" })
   assert.equal(missing.reason, "not-found")
 })
+
+// 返信のアイコン。返信も遅延読み込みなので、応答時点では src が空のことが多い。
+const wrappedReplyNoAvatar = (id) => wrappedReply(id).replace('<img src="https://yt3.ggpht.com/avatar.jpg">', "<img>")
+
+test("reply avatars that fill after the response reach the sub window as REPLY_AVATAR, not as feed rows", async (t) => {
+  const h = setup(t, section(threadWithReplies("parent", 2)))
+  h.doc.querySelector("ytd-comment-replies-renderer").insertAdjacentHTML("beforeend",
+    `<div id="expanded-threads">${wrappedReplyNoAvatar("parent.r1")}${wrappedReplyNoAvatar("parent.r2")}</div>`)
+  h.start()
+  const result = await h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:parent" })
+  assert.deepEqual(Array.from(result.items, (item) => item.avatarUrl), ["", ""], "avatars are empty at response time")
+
+  // YouTube が後から src を入れる（遅延読み込みの完了）
+  const imgs = h.doc.querySelectorAll("#expanded-threads #author-thumbnail img")
+  imgs[0].setAttribute("src", "https://yt3.ggpht.com/r1.jpg")
+  await h.advance(1000)
+
+  const pushed = h.events.filter((ev) => ev.type === "REPLY_AVATAR").flatMap((ev) => Array.from(ev.payload.items))
+  assert.deepEqual(pushed.map((item) => [item.id, item.parentId, item.avatarUrl]),
+    [["lc:parent.r1", "lc:parent", "https://yt3.ggpht.com/r1.jpg"]])
+  const leaked = h.events.filter((ev) => ev.type === "FEED_APPEND")
+    .flatMap((ev) => Array.from(ev.payload.items, (item) => item.id))
+    .filter((id) => id.startsWith("lc:parent."))
+  assert.deepEqual(leaked, [], "reply avatars must never be delivered as top-level feed rows")
+
+  // 再取得したときも、埋まったアイコンをそのまま返す
+  const again = await h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:parent" })
+  assert.equal(Array.from(again.items).find((item) => item.id === "lc:parent.r1").avatarUrl, "https://yt3.ggpht.com/r1.jpg")
+})

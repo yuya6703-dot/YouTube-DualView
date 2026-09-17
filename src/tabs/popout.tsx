@@ -203,6 +203,7 @@ export default function Popout() {
     status,
     related,
     feed,
+    replyAvatars,
     commentPage,
     relatedPage,
     tabId,
@@ -774,7 +775,7 @@ export default function Popout() {
               </div>
               <ul onScroll={onFeedScroll} className="min-h-0 flex-1 overflow-y-auto">
                 {feed.map((item) => (
-                  <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} settings={settings} />
+                  <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} settings={settings} replyAvatars={replyAvatars} />
                 ))}
                 <PagingTail
                   page={commentPage}
@@ -818,7 +819,7 @@ export default function Popout() {
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-neutral-800">
               <ul onScroll={onFeedScroll} className="min-h-0 flex-1 overflow-y-auto">
                 {feed.map((item) => (
-                  <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} settings={settings} />
+                  <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} settings={settings} replyAvatars={replyAvatars} />
                 ))}
                 <PagingTail
                   page={commentPage}
@@ -1145,7 +1146,7 @@ export default function Popout() {
               {commentsOpen && (
                 <ul onScroll={onFeedScroll} className="max-h-72 overflow-y-auto border-t border-neutral-800">
                   {feed.map((item) => (
-                    <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} settings={settings} />
+                    <CommentRow key={item.id} item={item} size={commentFontSize} tabId={tabId} t={t} settings={settings} replyAvatars={replyAvatars} />
                   ))}
                   <PagingTail
                     page={commentPage}
@@ -1509,11 +1510,14 @@ function NoteRow({ note, onJump, onRemove, t }: {
 /** 件数を短く表示する。1000未満はそのまま、以上は"1.2万"のような概算にはせず単純にkカンマ区切り */
 const fmtCount = (n: number) => (n >= 10000 ? `${(n / 10000).toFixed(1)}万` : n.toLocaleString())
 
-function CommentRow({ item, size, tabId, t, settings, isReply = false }: {
+function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = false }: {
   item: FeedItem; size: CommentFontSize; tabId: number | null; t: Dictionary
-  settings: Settings; isReply?: boolean
+  settings: Settings; replyAvatars: Record<string, string>; isReply?: boolean
 }) {
   const cls = COMMENT_SIZE_CLASSES[size]
+  // 返信のアイコンは応答時点で空のことが多く、後から REPLY_AVATAR で届く（usePlayerPort）。
+  // 通常コメントは feed の upsert で item 自体が更新されるので、この表には載らない。
+  const avatarUrl = item.avatarUrl || replyAvatars[item.id] || ""
 
   // コメントの手動翻訳（DeepL）。押した時だけ送信し、結果はこの行の中だけで保持する
   // （タブを開き直す・コメント一覧を作り直すと消える。永続化は不要な一時表示のため）。
@@ -1664,8 +1668,8 @@ function CommentRow({ item, size, tabId, t, settings, isReply = false }: {
       style={{ contentVisibility: "auto", containIntrinsicSize: "84px" }}
       className={`flex gap-2.5 border-b border-neutral-950 px-4 py-2 last:border-0 ${isReply ? "bg-neutral-950/40" : ""}`}>
       <div className="h-7 w-7 shrink-0 overflow-hidden rounded-full bg-neutral-800">
-        {item.avatarUrl && (
-          <img src={item.avatarUrl} alt="" className="h-full w-full object-cover" />
+        {avatarUrl && (
+          <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
         )}
       </div>
       <div className="min-w-0 flex-1">
@@ -1803,7 +1807,7 @@ function CommentRow({ item, size, tabId, t, settings, isReply = false }: {
         {repliesOpen && replies && replies.length > 0 && (
           <ul className="mt-1 border-l border-neutral-800 pl-2">
             {replies.map((reply) => (
-              <CommentRow key={reply.id} item={reply} size={size} tabId={tabId} t={t} settings={settings} isReply />
+              <CommentRow key={reply.id} item={reply} size={size} tabId={tabId} t={t} settings={settings} replyAvatars={replyAvatars} isReply />
             ))}
           </ul>
         )}

@@ -223,6 +223,10 @@ export function isRelatedDisplaySize(value: unknown): value is RelatedDisplaySiz
 export type StreamEvent =
   | { type: "STATUS";        payload: PlayerStatus }
   | { type: "FEED_APPEND";   payload: { kind: FeedKind; items: FeedItem[] } }
+  // 返信のアイコンが後から埋まったときの送り直し。返信はサブ画面の行の中に保持されていて
+  // 一覧(feed)には無いため、FEED_APPEND で送ると通常コメントとして追加されてしまう。
+  // items は parentId を持つ返信。Popout は id → avatarUrl の表として持ち、描画時に補う。
+  | { type: "REPLY_AVATAR";  payload: { items: FeedItem[] } }
   | { type: "FEED_RESET";    payload: { kind: FeedKind } }
   | { type: "RELATED";       payload: QueueItem[] }
   | { type: "PAGE_STATE";    payload: PageState }

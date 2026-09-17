@@ -45,6 +45,9 @@ export function usePlayerPort() {
   const [status, setStatus] = useState<PlayerStatus | null>(null)
   const [related, setRelated] = useState<QueueItem[] | null>(null)
   const [feed, setFeed] = useState<FeedItem[]>([])
+  // 返信のアイコンが後から埋まった分（id → URL）。返信は各行のローカル状態にあって
+  // feed には無いため、行が描画時にこの表で補う。動画が変わったら捨てる。
+  const [replyAvatars, setReplyAvatars] = useState<Record<string, string>>({})
   const [commentPage, setCommentPage] = useState<PageState>(EMPTY_COMMENT_PAGE)
   const [relatedPage, setRelatedPage] = useState<PageState>(EMPTY_RELATED_PAGE)
   const [tabId, setTabId] = useState<number | null>(null)
@@ -144,6 +147,14 @@ export function usePlayerPort() {
       if (ev.type === "FEED_RESET") {
         feedKindRef.current = ev.payload.kind
         setFeed([])
+        setReplyAvatars({})
+      }
+      if (ev.type === "REPLY_AVATAR") {
+        setReplyAvatars((prev) => {
+          const next = { ...prev }
+          for (const item of ev.payload.items) if (item.avatarUrl) next[item.id] = item.avatarUrl
+          return next
+        })
       }
       if (ev.type === "FEED_APPEND") {
         feedKindRef.current = ev.payload.kind
@@ -216,6 +227,7 @@ export function usePlayerPort() {
       setStatus(null)
       setRelated(null)
       setFeed([])
+      setReplyAvatars({})
       feedKindRef.current = "comment"
       setCommentPage(EMPTY_COMMENT_PAGE)
       setRelatedPage(EMPTY_RELATED_PAGE)
@@ -261,6 +273,7 @@ export function usePlayerPort() {
     status,
     related,
     feed,
+    replyAvatars,
     commentPage,
     relatedPage,
     tabId,
