@@ -1452,9 +1452,15 @@ function flushCommentEmit() {
 
 /** terminal確定後にcontinuationが遅れて現れた場合、自動ページングを再開する。 */
 function reviveCommentPagingIfAvailable() {
+  const container = commentContainerEl && document.contains(commentContainerEl)
+    ? commentContainerEl
+    : q(SELECTORS.comments.section)
   if (
     !commentLoading &&
     findTopLevelCommentContinuation() &&
+    // ★ 終端では continuation の死骸が残り続けるため、これが無いと done が毎回 idle に戻され、
+    //   サブ画面から要求されるたびに12回の空振りと誤エラーを繰り返す。
+    !commentsReachedEnd(container) &&
     (commentPageState.phase === "done" || commentPageState.phase === "error" || !commentPageState.hasMore)
   ) {
     updatePageState(makePageState("comment", "idle", commentItemCache.size, true))
@@ -1720,6 +1726,27 @@ function commentsAreDefinitelyEmpty(container: Element | null): boolean {
   return Number.isFinite(count) && count === 0
 }
 
+/**
+ * コメント一覧の終端に達したか。
+ *
+ * ★ 終端では continuation 要素が高さ0・ボタン無しの死骸として残る（2026-09-17 実機確認）ため、
+ *   continuation の有無では判定できない。それを頼りにすると、終端なのに12回nudgeし続けた末に
+ *   「コメントを読み込めませんでした。再試行してください」という誤ったエラーを出していた。
+ *   YouTube が最後の thread の直後に出す終端メッセージ（yt-comment-filter-context-view-model）を
+ *   根拠にする。文言は見ない（言語依存を避ける）。空の入れ物だけが置かれる可能性に備え、
+ *   文字が入っていること、かつ最後の thread より後ろに位置することの両方を要求する
+ *   （先頭に同種の注記が出る世代があっても、それを終端と誤認しないため）。
+ */
+function commentsReachedEnd(container: Element | null): boolean {
+  if (!container) return false
+  const notice = q<HTMLElement>(SELECTORS.comments.endOfList, container)
+  if (!notice || !(notice.textContent ?? "").trim()) return false
+  const threads = qaTopLevelThreads(container)
+  const last = threads[threads.length - 1]
+  if (!last) return false
+  return (last.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+}
+
 function loadMoreComments() {
   if (commentLoading || ports.size === 0 || !getVideoId()) return
 
@@ -1759,6 +1786,12 @@ function loadMoreComments() {
     if (currentContainer && currentContainer !== commentContainerEl) watchComments(false)
     const threads = currentCommentThreads()
     if (threads.length === 0 && commentsAreDefinitelyEmpty(currentContainer)) {
+      finish("done", false)
+      return
+    }
+    // ★ 終端メッセージが出ていれば、continuation の死骸が残っていても終端。
+    //   直前の nudge で最後のバッチが増えていた場合も、その増分は finish() が配信する。
+    if (commentsReachedEnd(currentContainer)) {
       finish("done", false)
       return
     }

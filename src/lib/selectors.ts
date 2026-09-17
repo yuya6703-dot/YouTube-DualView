@@ -116,6 +116,16 @@ export const SELECTORS = {
       "ytd-comments ytd-message-renderer",
       "ytd-comments#comments ytd-item-section-renderer #message"
     ],
+    // コメント一覧の終端メッセージ（「[人気順] が選択されているので、注目のコメントが表示されます」）。
+    // ★ 2026-09-17 実機確認: `#contents` の直下、最後の thread の**直後**に
+    //   `yt-comment-filter-context-view-model` として描画される（`ytd-message-renderer` ではないため
+    //   emptyMessage では拾えない）。このとき continuation 要素
+    //   （`ytd-continuation-item-renderer[is-initial-load]`）は高さ0・ボタン無しの死骸として残るので、
+    //   continuation の有無だけでは終端を判定できない。文言は言語依存なので見ない。
+    endOfList: [
+      "ytd-comments#comments ytd-item-section-renderer > #contents > yt-comment-filter-context-view-model",
+      "ytd-comments#comments yt-comment-filter-context-view-model"
+    ],
     count: ["ytd-comments-header-renderer #count", "#comments #count"],
     thread: ["ytd-comment-thread-renderer"],
     author: ["#author-text span", "#author-text"],
@@ -462,7 +472,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 57
+export const DIAGNOSE_VERSION = 58
 
 export type DiagnoseReport = {
   v: number
