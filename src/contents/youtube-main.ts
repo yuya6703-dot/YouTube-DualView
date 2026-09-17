@@ -1461,6 +1461,11 @@ function reviveCommentPagingIfAvailable() {
     // ★ 終端では continuation の死骸が残り続けるため、これが無いと done が毎回 idle に戻され、
     //   サブ画面から要求されるたびに12回の空振りと誤エラーを繰り返す。
     !commentsReachedEnd(container) &&
+    // ★ 0件確定（チャンネルがコメントをオフ / 0件表示）でも同じ死骸が残る。
+    //   これが無いと、1秒間隔の保険処理が毎秒 done→idle に戻し、直後の loadMoreComments() が
+    //   即 done に戻すため、サブ画面の下部が「取得できるコメントはありません」と
+    //   「読み込み中」を毎秒往復する（2026-09-17 実機で報告）。tryOnce と同じ条件で見る。
+    !(currentCommentThreads().length === 0 && commentsAreDefinitelyEmpty(container)) &&
     (commentPageState.phase === "done" || commentPageState.phase === "error" || !commentPageState.hasMore)
   ) {
     updatePageState(makePageState("comment", "idle", commentItemCache.size, true))
