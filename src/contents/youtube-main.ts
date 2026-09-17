@@ -1205,13 +1205,13 @@ function parseCommentThread(el: Element): FeedItem | null {
  *   `position:fixed`で動かしてもホストは画面外のままなので、v43は空振りしていたと考えられる。
  */
 /**
- * 読み直しのタイミング。最初の1回（600ms）は「画面内にあって自然に埋まった分」を拾うため、
+ * 読み直しのタイミング。最初の1回（150ms）は「画面内にあって自然に埋まった分」を拾うため、
  * 残りは保険。★ nudge は**最初の読み直しの直後**に始める（末尾ではない）。
  * 真因が遅延読み込み（画面内に入るまで永久に埋まらない）と分かった以上、8秒待ってから
  * 動き出すのは無駄で、40件なら 8秒＋40×0.7秒 ≒ 36秒かかっていた
  * （2026-09-17「アイコンの読み込みが遅い」と報告）。末尾の読み直しでまだ空なら2回目のnudgeを許す。
  */
-const AVATAR_BACKFILL_DELAYS_MS = [600, 1800, 4000, 8000] as const
+const AVATAR_BACKFILL_DELAYS_MS = [150, 1800, 4000, 8000] as const
 const AVATAR_FILL_DEBOUNCE_MS = 200
 /**
  * nudge の滞在時間。IntersectionObserver は要素が画面内に入った次の描画フレームで発火し、
@@ -1436,14 +1436,16 @@ function clearAvatarNudgeQueue() {
  */
 function runNextAvatarNudge() {
   const generation = avatarNudgeGeneration
-  for (;;) {
+  // ★ 1回の滞在で複数のアイコンを同時に画面内へ置く（nudgeManyIntoViewport）。
+  //   1件ずつだと 20件で約6秒かかっていた。祖先スタイルの取り合いは
+  //   nudgeManyIntoViewport 側で共有祖先を1回だけ処理して回避しているため、
+  //   「連鎖は1本」の原則はそのまま（バッチが1つずつ順に走る）。
+  const capacity = nudgeBatchCapacity()
+  const targets: HTMLElement[] = []
+  while (targets.length < capacity) {
     const id = avatarNudgeQueue.shift()
-    if (id === undefined) {
-      avatarNudgeRunning = false
-      return
-    }
+    if (id === undefined) break
     avatarNudgeQueuedIds.delete(id)
-    avatarNudgeRunning = true
 
     if (ports.size === 0) {
       clearAvatarNudgeQueue()
@@ -1456,14 +1458,19 @@ function runNextAvatarNudge() {
     if (!img) continue
 
     avatarNudgedIds.add(id)
-    // 埋まった結果は watchAvatarFills() が拾うが、監視の届かない経路でも取りこぼさないよう自分でも読む。
-    nudgeIntoViewport(resolveAvatarNudgeTarget(img), () => {
-      if (generation !== avatarNudgeGeneration) return // 中断済み（動画切り替え・切断など）
-      flushPendingAvatars()
-      runNextAvatarNudge()
-    }, AVATAR_NUDGE_DWELL_MS)
-    return // 次の1件はコールバックから進める
+    targets.push(resolveAvatarNudgeTarget(img))
   }
+  if (targets.length === 0) {
+    avatarNudgeRunning = false
+    return
+  }
+  avatarNudgeRunning = true
+  // 埋まった結果は watchAvatarFills() が拾うが、監視の届かない経路でも取りこぼさないよう自分でも読む。
+  nudgeManyIntoViewport(targets, () => {
+    if (generation !== avatarNudgeGeneration) return // 中断済み（動画切り替え・切断など）
+    flushPendingAvatars()
+    runNextAvatarNudge()
+  }, AVATAR_NUDGE_DWELL_MS)
 }
 
 function scheduleAvatarBackfill(threads: Element[], rescheduleExisting = false) {
@@ -1721,7 +1728,29 @@ function nudgeIntoViewport(el: HTMLElement, done: () => void, dwellMs = 700) {
 
   const targetSnapshot = snapshotProperties(el, TARGET_NUDGE_PROPERTIES)
   const snapshots: StyleSnapshot[] = [targetSnapshot]
-  // content-visibility/hidden の祖先内ではfixed子要素も交差しないため、必要な祖先だけ一時解除する。
+  unclipAncestors(el, player, new Set(), snapshots)
+  forceHidden(targetSnapshot, false)
+  placeInViewport(el, targetSnapshot, 1)
+
+  window.setTimeout(() => {
+    for (const snapshot of snapshots.reverse()) restoreSnapshot(snapshot)
+    const callbacks = activeNudges.get(el) ?? []
+    activeNudges.delete(el)
+    callbacks.forEach((callback) => callback())
+  }, dwellMs)
+}
+
+/**
+ * content-visibility/hidden の祖先内ではfixed子要素も交差しないため、必要な祖先だけ一時解除する。
+ * `seen` に入っている祖先は既に処理済み（複数対象を1回でnudgeするとき、共有の祖先を
+ * 二重にsnapshotしない。二重に取ると後の復元が先の「一時style」を原状として書き戻す）。
+ */
+function unclipAncestors(
+  el: HTMLElement,
+  player: HTMLElement | null,
+  seen: Set<Element>,
+  snapshots: StyleSnapshot[]
+) {
   for (let parent = el.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
     // ★安全装置その2: プレイヤーを含む祖先のスタイルは書き換えない。
     //   上の安全装置は「対象要素がプレイヤーを含むか」しか見ていなかったが、
@@ -1731,6 +1760,8 @@ function nudgeIntoViewport(el: HTMLElement, done: () => void, dwellMs = 700) {
     //   映像が真っ暗なまま復帰しなくなる（2026-08-19 実機で発生）。
     //   祖先を解除できなくても交差判定に失敗するだけで、呼び出し側のリトライに委ねられる。
     if (player && parent.contains(player)) continue
+    if (seen.has(parent)) continue
+    seen.add(parent)
     const computed = getComputedStyle(parent)
     const clipsDescendants = [computed.overflow, computed.overflowX, computed.overflowY]
       .some((value) => value === "hidden" || value === "clip")
@@ -1762,10 +1793,18 @@ function nudgeIntoViewport(el: HTMLElement, done: () => void, dwellMs = 700) {
       if (contain !== "" && contain !== "none") forceProperty(snapshot, "contain", "none")
     }
   }
+}
 
-  forceHidden(targetSnapshot, false)
+/** 縦に並べる1枠の高さ（24px の要素＋隙間）。複数対象を同時に画面内へ置くときに使う。 */
+const NUDGE_TILE_PX = 28
+
+/**
+ * 対象を viewport 内の `top` へ fixed 配置し、同期レイアウトを確定させる。
+ * 複数対象を同時に置くときは `top` を NUDGE_TILE_PX ずつずらして重ならないようにする。
+ */
+function placeInViewport(el: HTMLElement, targetSnapshot: StyleSnapshot, top: number) {
   const forced: Record<(typeof TARGET_NUDGE_PROPERTIES)[number], string> = {
-    position: "fixed", top: "1px", right: "1px", bottom: "auto", left: "auto",
+    position: "fixed", top: `${top}px`, right: "1px", bottom: "auto", left: "auto",
     width: "24px", height: "24px", "min-width": "24px", "min-height": "24px",
     display: "block", visibility: "visible", opacity: "1", "z-index": "2147483647",
     "pointer-events": "none", "content-visibility": "visible", contain: "none",
@@ -1786,17 +1825,50 @@ function nudgeIntoViewport(el: HTMLElement, done: () => void, dwellMs = 700) {
     forceProperty(
       targetSnapshot,
       "transform",
-      `translate(${Math.round(8 - rect.left)}px, ${Math.round(8 - rect.top)}px)`
+      `translate(${Math.round(8 - rect.left)}px, ${Math.round(top + 7 - rect.top)}px)`
     )
     rect = el.getBoundingClientRect()
   }
   void rect // 同期レイアウトを確定し、YouTube側IntersectionObserverの次回評価へ載せる
+}
+
+/** 1回の nudge で同時に画面内へ置ける対象数（viewport の高さで決まる。上限は控えめに）。 */
+function nudgeBatchCapacity(): number {
+  return Math.max(1, Math.min(12, Math.floor((window.innerHeight - 2) / NUDGE_TILE_PX)))
+}
+
+/**
+ * 複数の対象を**1回の滞在**で同時に画面内へ置く（アイコンの遅延読み込み用）。
+ *
+ * ★ 直列に1件ずつ nudge すると 20件で約6秒かかっていた（「アイコンの読み込みをもっと早く」）。
+ *   並走できなかった理由は祖先スタイルの取り合いなので、共有の祖先を `seen` で1回だけ処理し、
+ *   各対象は縦に枠をずらして配置すれば、1回の滞在で全員が交差する。
+ *   activeNudges の扱いは単体版と同じ（処理中の要素は共有、終了時にまとめて通知）。
+ */
+function nudgeManyIntoViewport(targets: HTMLElement[], done: () => void, dwellMs: number) {
+  const player = q<HTMLElement>(SELECTORS.player.root)
+  const fresh = targets.filter((el) => !(player && el.contains(player)) && !activeNudges.has(el))
+  if (fresh.length === 0) {
+    done()
+    return
+  }
+  const callbacks = [done]
+  for (const el of fresh) activeNudges.set(el, callbacks)
+
+  const snapshots: StyleSnapshot[] = []
+  const seen = new Set<Element>()
+  fresh.forEach((el, index) => {
+    const targetSnapshot = snapshotProperties(el, TARGET_NUDGE_PROPERTIES)
+    snapshots.push(targetSnapshot)
+    unclipAncestors(el, player, seen, snapshots)
+    forceHidden(targetSnapshot, false)
+    placeInViewport(el, targetSnapshot, 1 + index * NUDGE_TILE_PX)
+  })
 
   window.setTimeout(() => {
     for (const snapshot of snapshots.reverse()) restoreSnapshot(snapshot)
-    const callbacks = activeNudges.get(el) ?? []
-    activeNudges.delete(el)
-    callbacks.forEach((callback) => callback())
+    for (const el of fresh) activeNudges.delete(el)
+    for (const callback of callbacks) callback()
   }, dwellMs)
 }
 

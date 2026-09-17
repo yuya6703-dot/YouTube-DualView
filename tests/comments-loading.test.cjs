@@ -391,3 +391,18 @@ test("reply prefetches run one thread at a time, and a click shares an in-flight
   assert.deepEqual(Array.from((await pb).items, (item) => item.id), ["lc:b.r1"])
   assert.equal(clicksB(), 1, "a toggle is never clicked twice (that would collapse the thread)")
 })
+
+// アイコンの nudge はバッチ。1件ずつだと 20件で約6秒かかる。
+test("empty avatars are nudged in one batch with separate tiles, then restored", async (t) => {
+  const ids = ["a", "b", "c", "d", "e"]
+  const many = ids.map((id) => thread(id).replace('<img src="https://yt3.ggpht.com/avatar.jpg">', "<img>")).join("")
+  const h = setup(t, section(many))
+  h.start()
+  await h.advance(600) // emit(400ms debounce) → 最初の読み直し(150ms) → nudge 開始
+  const hosts = [...h.doc.querySelectorAll("#author-thumbnail")]
+  const fixed = hosts.filter((el) => el.style.position === "fixed")
+  assert.equal(fixed.length, ids.length, "all hosts are placed in the viewport at the same time")
+  assert.equal(new Set(fixed.map((el) => el.style.top)).size, ids.length, "each host gets its own tile")
+  await h.advance(400)
+  assert.equal(hosts.filter((el) => el.style.position === "fixed").length, 0, "styles are restored after the dwell")
+})
