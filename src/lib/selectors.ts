@@ -84,7 +84,8 @@ export const SELECTORS = {
   },
 
   comments: {
-    section: ["ytd-comments#comments", "#comments"],
+    // 通常欄と engagement panel の両方に存在する。利用時は findCommentSection() で選ぶ。
+    section: ["ytd-comments", "#comments"],
     // コメント要素自体がまだ生成されていないDOM世代で、遅延初期化を起動するための親領域。
     // ★ #primary-inner を単独候補に含めない。それは動画プレイヤーとコメント欄の共通の
     //   親であり、nudgeIntoViewport() で一時的に24x24pxへ縮めると、YouTube自身の
@@ -101,10 +102,10 @@ export const SELECTORS = {
       //   ytd-continuation-item-renderer はページ内に複数存在し（コメント本体用/返信用）、
       //   返信用を掴むと「返信の続き」が読み込まれてコメント本体は増えない。
       //   コメント本体用は ytd-item-section-renderer > #contents の直下にある。
-      "ytd-comments#comments ytd-item-section-renderer > #contents > ytd-continuation-item-renderer",
-      "ytd-comments#comments > ytd-item-section-renderer ytd-continuation-item-renderer",
-      "ytd-comments#comments ytd-continuation-item-renderer",
-      "ytd-comments#comments #continuations",
+      "ytd-comments ytd-item-section-renderer > #contents > ytd-continuation-item-renderer",
+      "ytd-comments > ytd-item-section-renderer ytd-continuation-item-renderer",
+      "ytd-comments ytd-continuation-item-renderer",
+      "ytd-comments #continuations",
       "#comments ytd-continuation-item-renderer"
     ],
     continuationButton: [
@@ -119,7 +120,7 @@ export const SELECTORS = {
     //   終端メッセージ（endOfList）とは別要素なので混同しないこと。
     emptyMessage: [
       "ytd-comments ytd-message-renderer",
-      "ytd-comments#comments ytd-item-section-renderer #message"
+      "ytd-comments ytd-item-section-renderer #message"
     ],
     // コメント一覧の終端メッセージ（「[人気順] が選択されているので、注目のコメントが表示されます」）。
     // ★ 2026-09-17 実機確認: `#contents` の直下、最後の thread の**直後**に
@@ -128,8 +129,8 @@ export const SELECTORS = {
     //   （`ytd-continuation-item-renderer[is-initial-load]`）は高さ0・ボタン無しの死骸として残るので、
     //   continuation の有無だけでは終端を判定できない。文言は言語依存なので見ない。
     endOfList: [
-      "ytd-comments#comments ytd-item-section-renderer > #contents > yt-comment-filter-context-view-model",
-      "ytd-comments#comments yt-comment-filter-context-view-model"
+      "ytd-comments ytd-item-section-renderer > #contents > yt-comment-filter-context-view-model",
+      "ytd-comments yt-comment-filter-context-view-model"
     ],
     count: ["ytd-comments-header-renderer #count", "#comments #count"],
     thread: ["ytd-comment-thread-renderer"],
@@ -259,6 +260,51 @@ export function qa<T extends Element = HTMLElement>(
     if (list.length > 0) return Array.from(list)
   }
   return []
+}
+
+/**
+ * 現在の動画のコメント欄を選ぶ。SPA遷移後も非表示の旧 #comments が残り、
+ * 別の ytd-comments（idのないパネル側）が読み込み先になる場合がある。
+ * 画面外・全画面中でも取得するので、座標やサイズを可否判定に使わない。
+ */
+export function findCommentSection(
+  videoId: string | null,
+  root: ParentNode = document
+): HTMLElement | null {
+  let panelFallback: HTMLElement | null = null
+  for (const section of root.querySelectorAll<HTMLElement>(SELECTORS.comments.section.join(","))) {
+    if (section.closest("[hidden]")) continue
+    // #comments が ytd-comments の内側にある世代でも、二重に候補へ数えない。
+    const owner = section.closest("ytd-comments")
+    if (owner && owner !== section) continue
+    const watch = section.closest("ytd-watch-flexy")
+    const ownerVideoId = watch?.getAttribute("video-id")
+    if (videoId && ownerVideoId && ownerVideoId !== videoId) continue
+
+    // ナビゲーション完了イベントより古いコメントDOMの撤去が遅れることがある。
+    // 混在期間は新動画のリンクが1件でもあれば採用し、各行は呼び出し側で濾過する。
+    let hasOtherVideo = false
+    let hasCurrentVideo = false
+    if (videoId) {
+      for (const link of section.querySelectorAll("#published-time-text a[href], a#published-time-text[href]")) {
+        try {
+          const linkedId = new URL(link.getAttribute("href")!, "https://www.youtube.com").searchParams.get("v")
+          if (linkedId === videoId) { hasCurrentVideo = true; break }
+          if (linkedId) hasOtherVideo = true
+        } catch { /* URLのない世代・未完成DOMは既存の行単位の判定へ委ねる。 */ }
+      }
+    }
+    if (hasOtherVideo && !hasCurrentVideo) continue
+
+    // 未展開パネルは通常欄より後回し。ただし通常欄が旧DOMだけなら、こちらの
+    // 初期continuationを使って読み込みを起動できる（IDが無くても対象にする）。
+    if (section.closest('ytd-engagement-panel-section-list-renderer[visibility="ENGAGEMENT_PANEL_VISIBILITY_HIDDEN"]')) {
+      panelFallback ??= section
+      continue
+    }
+    return section
+  }
+  return panelFallback
 }
 
 /** textContent を安全に取り出す（改行・全角空白を正規化） */
@@ -391,13 +437,7 @@ type RichTokenLocal =
  * false が並んだグループが、YouTube側の変更で壊れた箇所。
  */
 export function diagnose(root: ParentNode = document): Record<string, boolean> {
-  const result: Record<string, boolean> = {}
-  for (const [group, entries] of Object.entries(SELECTORS)) {
-    for (const [key, candidates] of Object.entries(entries as Record<string, readonly string[]>)) {
-      result[`${group}.${key}`] = q(candidates, root) !== null
-    }
-  }
-  return result
+  return Object.fromEntries(Object.entries(diagnoseDetail(root)).map(([key, value]) => [key, value.ok]))
 }
 
 /**
@@ -412,16 +452,25 @@ export function diagnose(root: ParentNode = document): Record<string, boolean> {
  */
 export function diagnoseDetail(root: ParentNode = document): DiagnoseDetail {
   const result: DiagnoseDetail = {}
+  const commentSection = findCommentSection(new URLSearchParams(location.search).get("v"), root)
   for (const [group, entries] of Object.entries(SELECTORS)) {
     for (const [key, candidates] of Object.entries(entries as Record<string, readonly string[]>)) {
+      // 実際に使っている欄だけを診断する。旧欄の大量のコメントが正常に見えると、
+      // 現在の欄が未初期化でも「取得成功」と報告されて切り分けができなくなる。
+      if (group === "comments" && key === "section") {
+        const sel = candidates.find((candidate) => commentSection?.matches(candidate)) ?? null
+        result[`${group}.${key}`] = { ok: sel !== null, sel, n: sel ? 1 : 0 }
+        continue
+      }
+      const scope = group === "comments" && key !== "activation" ? commentSection : root
       let sel: string | null = null
       for (const c of candidates) {
-        if (root.querySelector(c)) { sel = c; break }
+        if (scope?.querySelector(c)) { sel = c; break }
       }
       result[`${group}.${key}`] = {
         ok: sel !== null,
         sel,
-        n: sel ? root.querySelectorAll(sel).length : 0
+        n: sel && scope ? scope.querySelectorAll(sel).length : 0
       }
     }
   }
@@ -463,7 +512,7 @@ export function outline(el: Element | null, maxDepth = 4, maxChildren = 4): stri
 export function sampleOutlines(root: ParentNode = document): Record<string, string> {
   const relItems = qa(SELECTORS.related.item, root)
   const relItem = relItems.find((el) => !el.querySelector("feed-ad-metadata-view-model")) ?? relItems[0] ?? null
-  const commentSection = q(SELECTORS.comments.section, root)
+  const commentSection = findCommentSection(new URLSearchParams(location.search).get("v"), root)
   return {
     "related.item": outline(relItem, 8, 8),
     "comments.section": outline(commentSection, 5)
@@ -477,7 +526,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 61
+export const DIAGNOSE_VERSION = 62
 
 export type DiagnoseReport = {
   v: number

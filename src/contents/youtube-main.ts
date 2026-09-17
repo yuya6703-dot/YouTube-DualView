@@ -23,6 +23,7 @@ import {
 import {
   DIAGNOSE_VERSION,
   SELECTORS,
+  findCommentSection,
   parseClockDuration,
   q,
   qa,
@@ -246,7 +247,8 @@ setInterval(() => {
   //   nullを再探索する。検索結果ページ等では不要な探索を繰り返さない。
   if (location.pathname === "/watch" && getVideoId()) {
     if (!relatedContainerEl || !document.contains(relatedContainerEl)) watchRelated()
-    if (!commentContainerEl || !document.contains(commentContainerEl)) watchComments(false)
+    // 旧欄がDOMに残っていても、通常欄⇔パネル欄の切り替えを追従する。
+    if (!commentContainerEl || findCommentSection(getVideoId()) !== commentContainerEl) watchComments(false)
     else {
       reviveCommentPagingIfAvailable()
       if (currentCommentThreads().length === 0 && getPageState("comment").phase === "idle") {
@@ -749,9 +751,7 @@ function capturePreNavigationComments() {
     navigationStartCommentSnapshot = null
     return
   }
-  const container = commentContainerEl && document.contains(commentContainerEl)
-    ? commentContainerEl
-    : q(SELECTORS.comments.section)
+  const container = findCommentSection(lastVideoId)
   navigationStartCommentSnapshot = {
     videoId: lastVideoId,
     elements: container ? qaTopLevelThreads(container) : []
@@ -898,9 +898,7 @@ function markCommentUnsafe(el: Element) {
  * トップレベルのスレッドと、既に展開済みの返信の両方を対象にする。
  */
 function findCommentElementById(id: string): Element | null {
-  const container = commentContainerEl && document.contains(commentContainerEl)
-    ? commentContainerEl
-    : q(SELECTORS.comments.section)
+  const container = findCommentSection(getVideoId())
   if (!container) return null
 
   for (const el of qaTopLevelThreads(container)) {
@@ -1209,9 +1207,7 @@ function flushPendingAvatars(): number {
   }
   if (pendingAvatarIds.size === 0) return 0
 
-  const container = commentContainerEl && document.contains(commentContainerEl)
-    ? commentContainerEl
-    : q(SELECTORS.comments.section)
+  const container = findCommentSection(getVideoId())
   if (!container) return pendingAvatarIds.size
 
   const filled: FeedItem[] = []
@@ -1425,7 +1421,7 @@ function emitUnseenCommentThreads(threads: Element[]) {
 
 function flushCommentEmit() {
   commentDebounceId = null
-  const container = commentContainerEl
+  const container = findCommentSection(getVideoId())
   const threads = container && document.contains(container)
     ? qaTopLevelThreads(container)
     : []
@@ -1469,9 +1465,7 @@ function reviveCommentPagingIfAvailable() {
     commentPageState.phase === "done" || commentPageState.phase === "error" || !commentPageState.hasMore
   if (!terminal) return
 
-  const container = commentContainerEl && document.contains(commentContainerEl)
-    ? commentContainerEl
-    : q(SELECTORS.comments.section)
+  const container = findCommentSection(getVideoId())
   if (!findTopLevelCommentContinuation()) return
   // ★ 終端では continuation の死骸が残り続けるため、これが無いと done が毎回 idle に戻され、
   //   サブ画面から要求されるたびに12回の空振りと誤エラーを繰り返す。
@@ -1710,18 +1704,14 @@ function nudgeIntoViewport(el: HTMLElement, done: () => void, dwellMs = 700) {
  * 1要求が完了するまで次要求をまとめ、成功・末尾・タイムアウトを必ずPopoutへ返す。
  */
 function currentCommentThreads(): Element[] {
-  const container = commentContainerEl && document.contains(commentContainerEl)
-    ? commentContainerEl
-    : q(SELECTORS.comments.section)
+  const container = findCommentSection(getVideoId())
   if (!container) return []
   return qaTopLevelThreads(container)
     .filter((el) => belongsToCurrentVideo(el) && !isUnsafeComment(el))
 }
 
 function findTopLevelCommentContinuation(): HTMLElement | null {
-  const container = commentContainerEl && document.contains(commentContainerEl)
-    ? commentContainerEl
-    : q(SELECTORS.comments.section)
+  const container = findCommentSection(getVideoId())
   if (!container) return null
   // qa()は最初にヒットした候補だけを返すため、そこが返信用だけだった場合に
   // 後続候補のトップレベルcontinuationを探索できない。候補ごとに除外後の有効件を探す。
@@ -1735,6 +1725,8 @@ function findTopLevelCommentContinuation(): HTMLElement | null {
 
 function commentsAreDefinitelyEmpty(container: Element | null): boolean {
   if (!container) return false
+  // 旧動画の件数・メッセージを、新動画の0件確定として扱わない。
+  if (qaTopLevelThreads(container).some((el) => !belongsToCurrentVideo(el) || isUnsafeComment(el))) return false
   const message = q<HTMLElement>(SELECTORS.comments.emptyMessage, container)
   if (message?.textContent?.trim()) return true
   const countText = text(SELECTORS.comments.count, container).normalize("NFKC")
@@ -1760,6 +1752,7 @@ function commentsReachedEnd(container: Element | null): boolean {
   const notice = q<HTMLElement>(SELECTORS.comments.endOfList, container)
   if (!notice || !(notice.textContent ?? "").trim()) return false
   const threads = qaTopLevelThreads(container)
+  if (threads.some((el) => !belongsToCurrentVideo(el) || isUnsafeComment(el))) return false
   const last = threads[threads.length - 1]
   if (!last) return false
   return (last.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
@@ -1777,6 +1770,7 @@ function loadMoreComments() {
   let attempts = 0
   let lastActivatedTarget: HTMLElement | null = null
   let lastActivatedAt = 0
+  let loadingContainer = findCommentSection(getVideoId())
   const clickedContinuations = new WeakSet<HTMLElement>()
   updatePageState(makePageState("comment", "loading", commentItemCache.size, true))
 
@@ -1800,8 +1794,14 @@ function loadMoreComments() {
       return
     }
 
-    const currentContainer = q(SELECTORS.comments.section)
-    if (currentContainer && currentContainer !== commentContainerEl) watchComments(false)
+    const currentContainer = findCommentSection(getVideoId())
+    if (currentContainer !== loadingContainer) {
+      // 新しい欄の遅延生成に、旧欄で消費した試行回数を持ち越さない。
+      loadingContainer = currentContainer
+      attempts = 0
+      lastActivatedTarget = null
+    }
+    if (currentContainer !== commentContainerEl) watchComments(false)
     const threads = currentCommentThreads()
     if (threads.length === 0 && commentsAreDefinitelyEmpty(currentContainer)) {
       finish("done", false)
@@ -1904,7 +1904,7 @@ function watchComments(
   }
 
   const previousContainer = commentContainerEl
-  const container = q(SELECTORS.comments.section)
+  const container = findCommentSection(getVideoId())
   commentContainerEl = container
   if (!container) {
     // 旧コンテナが外れた直後は、そのDOMに対するnudgeと遅延タイマーも止める。
@@ -1945,7 +1945,13 @@ function watchComments(
   }
 
   commentObserver = new MutationObserver(scheduleCommentEmit)
-  commentObserver.observe(container, { childList: true, subtree: true })
+  commentObserver.observe(container, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ["href", "hidden"]
+  })
   watchAvatarFills(container) // アイコンの画像URLが後から埋まる瞬間を取りこぼさない
   scheduleCommentEmit() // 遷移時点で既に読み込み済みのコメントも拾う
   loadMoreComments()
@@ -2067,7 +2073,7 @@ function postToPort(port: chrome.runtime.Port, ev: StreamEvent): boolean {
  */
 function collectCommentItems(): FeedItem[] {
   const currentVideoId = getVideoId()
-  const container = commentContainerEl
+  const container = findCommentSection(getVideoId())
   const cacheMatchesVideo = Boolean(currentVideoId && lastVideoId === currentVideoId)
   const canHydrateComments = Boolean(
     cacheMatchesVideo &&
@@ -2391,19 +2397,22 @@ registerHandlers({
   },
   COMMENT_LOAD_REPLIES: async ({ commentId }) => ({ items: await loadRepliesFor(commentId) }),
   COMMENT_POST: async ({ text: body }) => {
-    let box = q<HTMLElement>(SELECTORS.comments.commentBox)
+    const videoId = getVideoId()
+    const container = findCommentSection(videoId)
+    if (!container) return { ok: false }
+    let box = q<HTMLElement>(SELECTORS.comments.commentBox, container)
     if (!box) {
       // ページ読み込み直後はプレースホルダだけが存在し、クリックして初めて
       // 本物のytd-commentboxが生成される（返信欄と同じパターン）。
-      const trigger = q<HTMLElement>(SELECTORS.comments.commentBoxTrigger)
+      const trigger = q<HTMLElement>(SELECTORS.comments.commentBoxTrigger, container)
       if (!trigger) return { ok: false }
       trigger.click()
       for (let attempt = 0; attempt < 5 && !box; attempt++) {
         await new Promise((resolve) => window.setTimeout(resolve, 200))
-        box = q<HTMLElement>(SELECTORS.comments.commentBox)
+        box = q<HTMLElement>(SELECTORS.comments.commentBox, container)
       }
     }
-    if (!box) return { ok: false }
+    if (!box || getVideoId() !== videoId || findCommentSection(videoId) !== container) return { ok: false }
     // 新規に投稿されたコメントは既存のコメント自動監視(watchComments/FEED_APPEND)が
     // 拾うため、ここで結果を組み立てて返す必要はない。成否だけ返す。
     const ok = await submitCommentBox(box, body)
