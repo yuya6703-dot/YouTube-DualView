@@ -112,6 +112,11 @@ export const SELECTORS = {
       "yt-button-shape button:not([disabled])",
       "tp-yt-paper-button#button:not([disabled])"
     ],
+    // コメント欄が0件で確定するときのメッセージ。
+    // ★ 2026-09-17 実機確認（チャンネルがコメントをオフにした動画）:
+    //   `#contents > ytd-message-renderer > yt-formatted-string#message`「コメントはオフになっています。」
+    //   第1候補で一致し、commentsAreDefinitelyEmpty() が即 done にする。
+    //   終端メッセージ（endOfList）とは別要素なので混同しないこと。
     emptyMessage: [
       "ytd-comments ytd-message-renderer",
       "ytd-comments#comments ytd-item-section-renderer #message"
