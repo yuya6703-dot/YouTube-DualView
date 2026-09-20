@@ -56,7 +56,7 @@ function load(relative, extra = "") {
 }
 const { DEFAULT_SETTINGS } = load("src/lib/messaging.ts")
 const { getDictionary } = load("src/lib/i18n.ts")
-const { testing } = load("src/tabs/popout.tsx", "\nexport const testing = { CommentRow, RelatedRow }\n")
+const { testing } = load("src/tabs/popout.tsx", "\nexport const testing = { CommentRow, RelatedRow, PagingTail }\n")
 
 const comment = (id, replyCount) => ({
   id, author: `Author ${id}`, avatarUrl: "", text: `Comment ${id}`,
@@ -157,4 +157,24 @@ test("related rows show the view count and publish time under the channel name",
 
   const none = await renderRelated(t, base)
   assert.deepEqual([...none.querySelectorAll("p")].map((p) => p.textContent.trim()), ["Title A", "Channel A"])
+})
+
+async function renderTail(t, page, itemCount) {
+  const container = document.body.appendChild(document.createElement("ul"))
+  const root = createRoot(container)
+  t.after(async () => { await act(async () => root.unmount()); container.remove() })
+  await act(async () => {
+    root.render(React.createElement(testing.PagingTail, {
+      page, itemCount, label: "コメント", t: getDictionary("ja"), onRetry() {}, sentinelRef: React.createRef()
+    }))
+  })
+  return container.textContent.trim()
+}
+
+test("an empty comment list shows YouTube's own reason when there is one", async (t) => {
+  const done = { kind: "comment", phase: "done", loaded: 0, hasMore: false }
+  assert.equal(await renderTail(t, { ...done, message: "コメントはオフになっています。" }, 0), "コメントはオフになっています。")
+  assert.equal(await renderTail(t, done, 0), "取得できるコメントはありません")
+  assert.equal(await renderTail(t, { ...done, loaded: 3, message: "コメントはオフになっています。" }, 3),
+    "コメントを最後まで読み込みました（3件）", "a reason never replaces the count once comments exist")
 })

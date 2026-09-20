@@ -1272,8 +1272,10 @@ function PagingTail({
       </span>
     )
   } else if (page.phase === "done" || !page.hasMore) {
+    // 0件のときは、YouTube が一覧に出している理由（「コメントはオフになっています。」等）があれば
+    // それをそのまま出す。無ければ汎用の文言（件数 0 で確定したとき）。
     content = itemCount === 0
-      ? t.pagingEmpty(label)
+      ? (page.message || t.pagingEmpty(label))
       : t.pagingDone(label, itemCount)
   } else {
     content = itemCount === 0

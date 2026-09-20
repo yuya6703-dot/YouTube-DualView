@@ -218,6 +218,9 @@ export interface PageState {
   loaded: number
   hasMore: boolean
   error?: string
+  // 0件で確定したとき、YouTube 側が一覧に出している理由の文言（「コメントはオフになっています。」等）。
+  // 言語はメイン画面に追随する。無ければサブ画面は汎用の「取得できる◯◯はありません」を出す。
+  message?: string
 }
 
 export const RELATED_DISPLAY_SIZES = ["sm", "md", "lg"] as const

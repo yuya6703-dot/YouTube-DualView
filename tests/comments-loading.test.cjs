@@ -499,3 +499,25 @@ test("promoted video cards are left out of the related list", async (t) => {
   h.start()
   assert.deepEqual(Array.from(h.api.fetchRelated(), (item) => item.videoId), ["aaaaaaaaaaa", "bbbbbbbbbbb"])
 })
+
+// コメントがオフの動画。実DOM（2026-09-20, 子ども向け動画）:
+//   ytd-message-renderer > yt-formatted-string#message > span「コメントはオフになっています。」+ a「詳細」
+// YouTube が出している理由の文言（リンクの「詳細」は除く）を、サブ画面が汎用文言の代わりに出す。
+test("the reason YouTube shows for an empty comment list travels with the done state", async (t) => {
+  const h = setup(t, section(`<ytd-message-renderer><div id="icon"></div>
+    <yt-formatted-string id="message"><span>コメントはオフになっています。</span><a href="https://support.google.com/youtube/answer/9706180">詳細</a></yt-formatted-string>
+    <yt-formatted-string id="submessage"></yt-formatted-string></ytd-message-renderer>`))
+  h.start()
+  const state = h.api.state()
+  assert.equal(state.phase, "done")
+  assert.equal(state.loaded, 0)
+  assert.equal(state.message, "コメントはオフになっています。")
+})
+
+test("a zero comment count has no YouTube reason, so the sub window keeps its generic wording", async (t) => {
+  const h = setup(t, section('<ytd-comments-header-renderer><span id="count">０ 件のコメント</span></ytd-comments-header-renderer>' + continuation))
+  h.start()
+  await h.advance(15000)
+  assert.equal(h.api.state().phase, "done")
+  assert.equal(h.api.state().message, undefined)
+})

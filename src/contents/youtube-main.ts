@@ -142,9 +142,10 @@ function makePageState(
   phase: PageState["phase"],
   loaded: number,
   hasMore: boolean,
-  error?: string
+  error?: string,
+  message?: string
 ): PageState {
-  return { kind, phase, loaded, hasMore, ...(error ? { error } : {}) }
+  return { kind, phase, loaded, hasMore, ...(error ? { error } : {}), ...(message ? { message } : {}) }
 }
 
 const pushStatus = () => {
@@ -1967,6 +1968,25 @@ function findTopLevelCommentContinuation(): HTMLElement | null {
   return null
 }
 
+/**
+ * コメント欄が0件で確定したときに YouTube が出している文言（「コメントはオフになっています。」等）。
+ * 実DOM（2026-09-20）: `ytd-message-renderer > yt-formatted-string#message > span「…」+ a「詳細」`。
+ * 「詳細」のようなリンク・ボタンは除いて本文だけを返す。文言は解釈せず（言語依存を避ける）、
+ * サブ画面がそのまま表示する。件数 0 で確定したときは要素が無く undefined。
+ */
+function readCommentsEmptyMessage(container: Element | null): string | undefined {
+  const renderer = container ? q<HTMLElement>(SELECTORS.comments.emptyMessage, container) : null
+  if (!renderer) return undefined
+  const message = renderer.querySelector("#message") ?? renderer
+  const body = Array.from(message.childNodes)
+    .filter((node) => !(node instanceof Element && node.matches("a, button, yt-button-shape, #message-button")))
+    .map((node) => node.textContent ?? "")
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim()
+  return body || undefined
+}
+
 function commentsAreDefinitelyEmpty(container: Element | null): boolean {
   if (!container) return false
   // 旧動画の件数・メッセージを、新動画の0件確定として扱わない。
@@ -2024,7 +2044,11 @@ function loadMoreComments() {
     const threads = currentCommentThreads()
     emitUnseenCommentThreads(threads)
     scheduleCommentEmit()
-    updatePageState(makePageState("comment", phase, commentItemCache.size, hasMore, error))
+    // 0件で終わるときは、YouTube が一覧に出している理由（「コメントはオフになっています。」等）を添える。
+    const message = phase === "done" && threads.length === 0
+      ? readCommentsEmptyMessage(findCommentSection(getVideoId()))
+      : undefined
+    updatePageState(makePageState("comment", phase, commentItemCache.size, hasMore, error, message))
   }
 
   const tryOnce = () => {
