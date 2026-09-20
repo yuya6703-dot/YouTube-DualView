@@ -21,7 +21,7 @@ import {
   verticalListSortingStrategy
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Check, ChevronDown, ChevronUp, ClipboardCopy, Columns2, CornerDownRight, Expand, GripVertical, ListPlus, ListVideo, Loader2, Maximize2, MessageSquare, Minimize2, Pause, Pin, Play, Plus, RefreshCw, RotateCcw, RotateCw, Rows2, Search, Shrink, Stethoscope, StickyNote, ThumbsUp, Trash2, Volume2, VolumeX, X } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, ClipboardCopy, Columns2, CornerDownRight, Expand, Eye, GripVertical, ListPlus, ListVideo, Loader2, Maximize2, MessageSquare, Minimize2, Pause, Pin, Play, Plus, RefreshCw, RotateCcw, RotateCw, Rows2, Search, Shrink, Stethoscope, StickyNote, ThumbsUp, Trash2, Volume2, VolumeX, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   DEFAULT_RELATED_DISPLAY_SIZE,
@@ -120,27 +120,32 @@ const RELATED_SIZE_CLASSES: Record<RelatedDisplaySize, {
   thumbnail: string
   title: string
   channel: string
+  meta: string
 }> = {
   sm: {
-    intrinsicSize: "92px",
+    // sm だけは文字側（タイトル3行＋チャンネル＋メタ行）がサムネイルより高くなる
+    intrinsicSize: "108px",
     button: "gap-3 px-4 py-2.5",
     thumbnail: "w-32",
     title: "line-clamp-3 text-[13px] leading-snug",
-    channel: "mt-1 text-[11px]"
+    channel: "mt-1 text-[11px]",
+    meta: "text-[11px]"
   },
   md: {
     intrinsicSize: "128px",
     button: "gap-3.5 px-4 py-2.5",
     thumbnail: "w-48",
     title: "line-clamp-3 text-[15px] leading-snug",
-    channel: "mt-1 text-[12px]"
+    channel: "mt-1 text-[12px]",
+    meta: "text-[12px]"
   },
   lg: {
     intrinsicSize: "168px",
     button: "gap-4 px-4 py-3",
     thumbnail: "w-64",
     title: "line-clamp-4 text-[17px] leading-snug",
-    channel: "mt-1.5 text-[13px]"
+    channel: "mt-1.5 text-[13px]",
+    meta: "text-[13px]"
   }
 }
 
@@ -1336,6 +1341,20 @@ function RelatedRow({ item, size, onPlay, onQueue, t }: {
         <div className="min-w-0 flex-1">
           <p className={`text-neutral-200 ${cls.title}`}>{item.title || t.titleLoading}</p>
           <p className={`truncate text-neutral-500 ${cls.channel}`}>{item.channelName || "—"}</p>
+          {/* 再生回数と投稿時期。YouTube の新UIと同じく目のアイコン＋数字（"168万"）で出す。
+              旧DOM由来の "12万 回視聴" のような文言もそのまま出す（言語・略記はメイン画面に追随） */}
+          {(item.viewCount || item.publishedAt) && (
+            <p className={`flex items-center gap-1 overflow-hidden whitespace-nowrap text-neutral-500 ${cls.meta}`}>
+              {item.viewCount && (
+                <>
+                  <Eye size={11} className="shrink-0" aria-hidden="true" />
+                  <span className="truncate">{item.viewCount}</span>
+                </>
+              )}
+              {item.viewCount && item.publishedAt && <span aria-hidden="true">•</span>}
+              {item.publishedAt && <span className="truncate">{item.publishedAt}</span>}
+            </p>
+          )}
         </div>
       </button>
       {FEATURES.queue && (

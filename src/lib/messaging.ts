@@ -41,6 +41,10 @@ export interface QueueItem {
   channelName: string
   thumbnailUrl: string
   duration: number     // 秒。取得不能時は 0
+  // 関連動画カードのメタ行。YouTube の表示文言をそのまま持つ（"168万" / "12万 回視聴"、"5 か月前"）。
+  // 言語・略記はメイン画面に追随する。取得できなければ省略（サブ画面はその項目を出さない）。
+  viewCount?: string
+  publishedAt?: string
 }
 
 /**

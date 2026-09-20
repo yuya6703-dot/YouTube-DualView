@@ -83,7 +83,7 @@ function setup(t, html, video = "current") {
       bound: () => commentContainerEl,
       items: () => Array.from(commentItemCache.values()),
       loadMoreComments, commentsReachedEnd, commentsAreDefinitelyEmpty,
-      findTopLevelCommentContinuation, stopWatchPageObservers
+      findTopLevelCommentContinuation, stopWatchPageObservers, fetchRelated
     }
   `)
   const port = { postMessage: (event) => events.push(event) }
@@ -427,4 +427,48 @@ test("a display:none ancestor is rendered without taking space while its descend
   assert.equal(columns.style.getPropertyValue("display"), "none", "the original display is restored")
   assert.equal(columns.style.getPropertyValue("height"), "", "temporary sizing is removed")
   assert.equal(columns.style.getPropertyValue("overflow-y"), "", "temporary clipping is removed")
+})
+
+// 関連動画カードのメタ行。新DOM（yt-lockup-view-model）は「チャンネル名」「[目] 168万 • 5 か月前」の2行、
+// 旧DOM（ytd-compact-video-renderer）は #metadata-line の中に inline-metadata-item が2つ（2026-09-20 実DOM）。
+const lockupCard = (videoId, title, channel, metaRow) => `
+  <yt-lockup-view-model>
+    <a class="ytLockupMetadataViewModelTitle" href="/watch?v=${videoId}"><span>${title}</span></a>
+    <yt-content-metadata-view-model>
+      <div class="ytContentMetadataViewModelMetadataRow"><span class="ytContentMetadataViewModelMetadataText">${channel}<span class="ytIconWrapperHost"></span></span></div>
+      ${metaRow}
+    </yt-content-metadata-view-model>
+  </yt-lockup-view-model>`
+const lockupMetaRow = (views, published) => `
+  <div class="ytContentMetadataViewModelMetadataRow">
+    <span class="ytIconWrapperHost ytContentMetadataViewModelLeadingIcon"></span>
+    ${views ? `<span class="ytContentMetadataViewModelMetadataText">${views}</span><span class="ytContentMetadataViewModelDelimiter">•</span>` : ""}
+    <span class="ytContentMetadataViewModelMetadataText">${published}</span>
+  </div>`
+const compactCard = (videoId, title, channel, views, published) => `
+  <ytd-compact-video-renderer>
+    <a id="video-title" href="/watch?v=${videoId}">${title}</a>
+    <ytd-channel-name><div id="text">${channel}</div></ytd-channel-name>
+    <ytd-video-meta-block><div id="metadata-line">
+      <span class="inline-metadata-item">${views}</span><span class="inline-metadata-item">${published}</span>
+    </div></ytd-video-meta-block>
+  </ytd-compact-video-renderer>`
+
+test("related videos carry the view count and publish time from both DOM generations", async (t) => {
+  const h = setup(t, `<div id="related"><ytd-watch-next-secondary-results-renderer><div id="items">
+    ${lockupCard("aaaaaaaaaaa", "Title A", "Channel A", lockupMetaRow("168万", "5 か月前"))}
+    ${lockupCard("ccccccccccc", "Title C", "Channel 2024", lockupMetaRow("", "2 年前に配信済み"))}
+    ${lockupCard("ddddddddddd", "Title D", "Channel D", "")}
+    ${lockupCard("eeeeeeeeeee", "Title E", "Channel E", lockupMetaRow("116万", "1 年前") + '<div class="ytContentMetadataViewModelMetadataRow"><span class="ytIconWrapperHost"></span>オートダビング版</div>')}
+    ${compactCard("bbbbbbbbbbb", "Title B", "Channel B", "12万 回視聴", "1 年前")}
+  </div></ytd-watch-next-secondary-results-renderer></div>`)
+  h.start()
+  const items = Array.from(h.api.fetchRelated(), ({ videoId, channelName, viewCount, publishedAt }) => ({ videoId, channelName, viewCount, publishedAt }))
+  assert.deepEqual(items, [
+    { videoId: "aaaaaaaaaaa", channelName: "Channel A", viewCount: "168万", publishedAt: "5 か月前" },
+    { videoId: "ccccccccccc", channelName: "Channel 2024", viewCount: undefined, publishedAt: "2 年前に配信済み" },
+    { videoId: "ddddddddddd", channelName: "Channel D", viewCount: undefined, publishedAt: undefined },
+    { videoId: "eeeeeeeeeee", channelName: "Channel E", viewCount: "116万", publishedAt: "1 年前" }, // バッジ行付き
+    { videoId: "bbbbbbbbbbb", channelName: "Channel B", viewCount: "12万 回視聴", publishedAt: "1 年前" }
+  ])
 })

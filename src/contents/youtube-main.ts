@@ -447,15 +447,45 @@ function parseRelatedItem(el: Element): QueueItem | null {
   }
   if (!videoId) return null
 
+  const channelName = text(SELECTORS.related.channel, el)
   return {
     // 同じ推薦を再送してもReact行を作り直さないよう、動画IDを安定キーにする。
     id: videoId,
     videoId,
     title: extractRelatedTitle(el, videoId, videoLinks),
-    channelName: text(SELECTORS.related.channel, el),
+    channelName,
     thumbnailUrl: extractRelatedThumbnail(el),
-    duration: parseClockDuration(text(SELECTORS.related.duration, el))
+    duration: parseClockDuration(text(SELECTORS.related.duration, el)),
+    ...readRelatedMeta(el, channelName)
   }
+}
+
+/** 「5 か月前」「1 年前に配信済み」「5 months ago」「Streamed 2 years ago」など、投稿時期らしい文言 */
+const RELATIVE_TIME_PATTERN = /前|ago/
+
+/**
+ * 関連動画カードのメタ行（再生回数・投稿時期）を読む。文言は YouTube の表示のまま。
+ * 新DOMはチャンネル名の行とメタ行が同じクラスで並び、さらに「オートダビング版」のような
+ * バッジ行が後ろに付くこともある（2026-09-20 実DOM）。行を後ろから見て、数字を含む
+ * テキスト片（"168万" "1 年前"）を持つ最初の行を採用し、チャンネル名と同じ文字列は除く。
+ * 片方しか無いときは「前 / ago」を含むかで投稿時期と再生回数を見分ける（ライブや予定の配信）。
+ */
+function readRelatedMeta(el: Element, channelName: string): Pick<QueueItem, "viewCount" | "publishedAt"> {
+  const rows = qa(SELECTORS.related.metaRow, el)
+  for (let index = rows.length - 1; index >= 0; index--) {
+    const row = rows[index]
+    if (!row) continue
+    const parts = qa(SELECTORS.related.metaText, row)
+      .map((part) => (part.textContent ?? "").replace(/\s+/g, " ").trim())
+      .filter((value) => value !== "" && value !== channelName)
+    const first = parts[0]
+    const last = parts[parts.length - 1]
+    if (first === undefined || last === undefined) continue
+    if (!parts.some((value) => /\d/.test(value))) continue // 数字の無い行はバッジ等
+    if (parts.length === 1) return RELATIVE_TIME_PATTERN.test(first) ? { publishedAt: first } : { viewCount: first }
+    return { viewCount: first, publishedAt: last }
+  }
+  return {}
 }
 
 function fetchRelated(): QueueItem[] {
@@ -500,7 +530,9 @@ function fetchRelated(): QueueItem[] {
       title: item.title || existing.title,
       channelName: item.channelName || existing.channelName,
       thumbnailUrl: item.thumbnailUrl || existing.thumbnailUrl,
-      duration: item.duration || existing.duration
+      duration: item.duration || existing.duration,
+      ...(item.viewCount || existing.viewCount ? { viewCount: item.viewCount || existing.viewCount } : {}),
+      ...(item.publishedAt || existing.publishedAt ? { publishedAt: item.publishedAt || existing.publishedAt } : {})
     } : item)
   }
   relatedItemCache = snapshot

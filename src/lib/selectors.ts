@@ -75,6 +75,20 @@ export const SELECTORS = {
       "ytd-thumbnail img"
     ],
     thumbSource: ["picture source[srcset]", "source[srcset]"],
+    // カードのメタ行。新DOMは行が2つ（1行目チャンネル名、2行目「[目のアイコン] 168万 • 5 か月前」）、
+    // 旧DOMは #metadata-line の中に inline-metadata-item が2つ（"12万 回視聴" "1 年前"）。
+    // 2026-09-20 実DOMで確認。行の中のテキスト片は metaText で取る。
+    metaRow: [
+      ".ytContentMetadataViewModelMetadataRow",
+      ".yt-content-metadata-view-model__metadata-row",
+      "#metadata-line"
+    ],
+    metaText: [
+      ".ytContentMetadataViewModelMetadataText",
+      ".yt-content-metadata-view-model__metadata-text",
+      "span.inline-metadata-item",
+      ":scope > span"
+    ],
     duration: [
       ".ytThumbnailBottomOverlayViewModelBadgeContainer .ytBadgeShapeText",
       "badge-shape .badge-shape-wiz__text",
@@ -526,7 +540,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 68
+export const DIAGNOSE_VERSION = 69
 
 export type DiagnoseReport = {
   v: number

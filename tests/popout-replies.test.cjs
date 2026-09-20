@@ -56,7 +56,7 @@ function load(relative, extra = "") {
 }
 const { DEFAULT_SETTINGS } = load("src/lib/messaging.ts")
 const { getDictionary } = load("src/lib/i18n.ts")
-const { testing } = load("src/tabs/popout.tsx", "\nexport const testing = { CommentRow }\n")
+const { testing } = load("src/tabs/popout.tsx", "\nexport const testing = { CommentRow, RelatedRow }\n")
 
 const comment = (id, replyCount) => ({
   id, author: `Author ${id}`, avatarUrl: "", text: `Comment ${id}`,
@@ -130,4 +130,31 @@ test("the publish time is rendered next to the author for comments and replies",
   assert.match(container.textContent, /Replier r1|Author r1/)
   assert.ok([...container.querySelectorAll("p")].some((p) => /^Author r1\s*3 週間前（編集済み）$/.test(p.textContent)),
     "the reply row shows its own publish time")
+})
+
+async function renderRelated(t, item) {
+  const container = document.body.appendChild(document.createElement("ul"))
+  const root = createRoot(container)
+  t.after(async () => { await act(async () => root.unmount()); container.remove() })
+  await act(async () => {
+    root.render(React.createElement(testing.RelatedRow, {
+      item, size: "md", onPlay() {}, onQueue() {}, t: getDictionary("ja")
+    }))
+  })
+  return container
+}
+
+test("related rows show the view count and publish time under the channel name", async (t) => {
+  const base = { id: "v1", videoId: "aaaaaaaaaaa", title: "Title A", channelName: "Channel A", thumbnailUrl: "", duration: 754 }
+  // flex の gap は textContent に出ないので、行は span 単位で読む（アイコンのスタブは空文字）
+  const lines = (container) => [...container.querySelectorAll("p")].map((p) =>
+    (p.querySelectorAll("span").length ? [...p.querySelectorAll("span")].map((s) => s.textContent.trim()).filter(Boolean) : [p.textContent.trim()]).join(" "))
+  const full = await renderRelated(t, { ...base, viewCount: "168万", publishedAt: "5 か月前" })
+  assert.deepEqual(lines(full), ["Title A", "Channel A", "168万 • 5 か月前"])
+
+  const timeOnly = await renderRelated(t, { ...base, publishedAt: "2 年前に配信済み" })
+  assert.deepEqual(lines(timeOnly), ["Title A", "Channel A", "2 年前に配信済み"])
+
+  const none = await renderRelated(t, base)
+  assert.deepEqual([...none.querySelectorAll("p")].map((p) => p.textContent.trim()), ["Title A", "Channel A"])
 })
