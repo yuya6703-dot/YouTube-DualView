@@ -466,8 +466,12 @@ function parseRelatedItem(el: Element): QueueItem | null {
   }
 }
 
-/** 「5 か月前」「1 年前に配信済み」「5 months ago」「Streamed 2 years ago」など、投稿時期らしい文言 */
-const RELATIVE_TIME_PATTERN = /前|ago/
+/**
+ * 投稿時期らしい文言。「5 か月前」「1 年前に配信済み」「5 months ago」「Streamed 2 years ago」に加え、
+ * 配信予定・プレミア公開の「10 分後にプレミア公開」「Premieres in 10 minutes」「Scheduled for …」も
+ * 時期側に寄せる（メタ行が1片しか無いときの振り分けにだけ使う。"1.2K watching" は再生回数側）。
+ */
+const RELATIVE_TIME_PATTERN = /前|後|ago|予定|プレミア|Premiere|Scheduled|Upcoming/
 
 /**
  * 関連動画カードのメタ行（再生回数・投稿時期）を読む。文言は YouTube の表示のまま。

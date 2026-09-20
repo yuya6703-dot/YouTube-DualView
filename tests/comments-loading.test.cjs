@@ -460,6 +460,8 @@ test("related videos carry the view count and publish time from both DOM generat
     ${lockupCard("ccccccccccc", "Title C", "Channel 2024", lockupMetaRow("", "2 年前に配信済み"))}
     ${lockupCard("ddddddddddd", "Title D", "Channel D", "")}
     ${lockupCard("eeeeeeeeeee", "Title E", "Channel E", lockupMetaRow("116万", "1 年前") + '<div class="ytContentMetadataViewModelMetadataRow"><span class="ytIconWrapperHost"></span>オートダビング版</div>')}
+    ${lockupCard("fffffffffff", "Title F", "Channel F", lockupMetaRow("", "10 分後にプレミア公開"))}
+    ${lockupCard("ggggggggggg", "Title G", "Channel G", lockupMetaRow("", "1.2K watching"))}
     ${compactCard("bbbbbbbbbbb", "Title B", "Channel B", "12万 回視聴", "1 年前")}
   </div></ytd-watch-next-secondary-results-renderer></div>`)
   h.start()
@@ -469,6 +471,8 @@ test("related videos carry the view count and publish time from both DOM generat
     { videoId: "ccccccccccc", channelName: "Channel 2024", viewCount: undefined, publishedAt: "2 年前に配信済み" },
     { videoId: "ddddddddddd", channelName: "Channel D", viewCount: undefined, publishedAt: undefined },
     { videoId: "eeeeeeeeeee", channelName: "Channel E", viewCount: "116万", publishedAt: "1 年前" }, // バッジ行付き
+    { videoId: "fffffffffff", channelName: "Channel F", viewCount: undefined, publishedAt: "10 分後にプレミア公開" }, // 予定
+    { videoId: "ggggggggggg", channelName: "Channel G", viewCount: "1.2K watching", publishedAt: undefined }, // ライブ
     { videoId: "bbbbbbbbbbb", channelName: "Channel B", viewCount: "12万 回視聴", publishedAt: "1 年前" }
   ])
 })
