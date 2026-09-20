@@ -23,6 +23,7 @@ import {
 } from "~lib/messaging"
 import {
   DIAGNOSE_VERSION,
+  isRelatedAdCard,
   SELECTORS,
   findCommentSection,
   parseClockDuration,
@@ -434,9 +435,14 @@ function findRelatedItems(container: Element): Element[] {
 
 /**
  * 1件の関連動画要素から QueueItem を組み立てる。
- * 広告カードは /watch?v= を持たないため videoId が取れず、自然に除外される。
+ * ★ 広告カードは明示的に除外する。「/watch?v= を持たないので自然に除外される」は誤りで、
+ *   プロモーション動画はサムネイルと /watch?v= リンクを持つ。タイトル・チャンネル名は
+ *   feed-ad-metadata-view-model 側にあって取れないため、サブ画面では
+ *   「（タイトルを読み込んでいます…）」のまま永久に埋まらないカードになっていた（2026-09-20 実機）。
+ *   サブ画面は推薦を選ぶための一覧なので、広告は載せない。
  */
 function parseRelatedItem(el: Element): QueueItem | null {
+  if (isRelatedAdCard(el)) return null
   const videoLinks = qa<HTMLAnchorElement>(SELECTORS.related.link, el)
   const link = videoLinks[0]
   let videoId: string | null = null

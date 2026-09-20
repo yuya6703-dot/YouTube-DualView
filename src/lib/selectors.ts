@@ -518,6 +518,25 @@ export function outline(el: Element | null, maxDepth = 4, maxChildren = 4): stri
 }
 
 /**
+ * 関連動画欄の広告カードを見分ける印。SELECTORS に入れないのは、広告の無いページで
+ * 診断が「×」を出して壊れたように見えるため（診断は SELECTORS の全キーを列挙する）。
+ * - inside:   カードの中にあれば広告（feed-ad-metadata-view-model は 2026-08 から実機で確認。
+ *             プロモーション動画は /watch?v= リンクとサムネイルを持つが、タイトル・チャンネル名は
+ *             この要素の中にあり通常の候補では取れない）
+ * - ancestor: カードがこの中に包まれていれば広告
+ */
+export const RELATED_AD_MARKERS = {
+  inside: ["feed-ad-metadata-view-model", "ad-badge-view-model", ".ytAdBadge"],
+  ancestor: ["ytd-ad-slot-renderer", "ytd-promoted-video-renderer", "ytd-compact-promoted-video-renderer", "ytd-in-feed-ad-layout-renderer"]
+} as const
+
+/** 関連動画カードが広告かどうか */
+export function isRelatedAdCard(el: Element): boolean {
+  return RELATED_AD_MARKERS.inside.some((sel) => el.querySelector(sel) !== null) ||
+    RELATED_AD_MARKERS.ancestor.some((sel) => el.closest(sel) !== null)
+}
+
+/**
  * 壊れた箇所を直すための現物サンプル。診断と一緒に持ち帰る。
  *
  * ★ related.item は先頭が広告カード(feed-ad-metadata-view-model)であることが多く、
@@ -525,7 +544,7 @@ export function outline(el: Element | null, maxDepth = 4, maxChildren = 4): stri
  */
 export function sampleOutlines(root: ParentNode = document): Record<string, string> {
   const relItems = qa(SELECTORS.related.item, root)
-  const relItem = relItems.find((el) => !el.querySelector("feed-ad-metadata-view-model")) ?? relItems[0] ?? null
+  const relItem = relItems.find((el) => !isRelatedAdCard(el)) ?? relItems[0] ?? null
   const commentSection = findCommentSection(new URLSearchParams(location.search).get("v"), root)
   return {
     "related.item": outline(relItem, 8, 8),
@@ -540,7 +559,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 69
+export const DIAGNOSE_VERSION = 70
 
 export type DiagnoseReport = {
   v: number

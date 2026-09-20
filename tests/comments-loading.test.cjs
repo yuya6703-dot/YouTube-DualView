@@ -472,3 +472,26 @@ test("related videos carry the view count and publish time from both DOM generat
     { videoId: "bbbbbbbbbbb", channelName: "Channel B", viewCount: "12万 回視聴", publishedAt: "1 年前" }
   ])
 })
+
+// 広告カード。サムネイルと /watch?v= リンクは持つが、タイトル・チャンネル名は
+// feed-ad-metadata-view-model の中にあって通常の候補では取れない（サブ画面では
+// 「（タイトルを読み込んでいます…）」のまま永久に埋まらない。2026-09-20 実機のスクリーンショット）。
+const adCard = (videoId, wrapInSlot) => {
+  const card = `
+    <yt-lockup-view-model>
+      <a href="/watch?v=${videoId}"><img src="https://i.ytimg.com/vi/${videoId}/hqdefault.jpg"></a>
+      <feed-ad-metadata-view-model><span class="ytFeedAdMetadataViewModelTitle">Sponsored video</span></feed-ad-metadata-view-model>
+    </yt-lockup-view-model>`
+  return wrapInSlot ? `<ytd-ad-slot-renderer>${card}</ytd-ad-slot-renderer>` : card
+}
+
+test("promoted video cards are left out of the related list", async (t) => {
+  const h = setup(t, `<div id="related"><ytd-watch-next-secondary-results-renderer><div id="items">
+    ${adCard("adadadadada", true)}
+    ${lockupCard("aaaaaaaaaaa", "Title A", "Channel A", lockupMetaRow("168万", "5 か月前"))}
+    ${adCard("adadadadadb", false)}
+    ${compactCard("bbbbbbbbbbb", "Title B", "Channel B", "12万 回視聴", "1 年前")}
+  </div></ytd-watch-next-secondary-results-renderer></div>`)
+  h.start()
+  assert.deepEqual(Array.from(h.api.fetchRelated(), (item) => item.videoId), ["aaaaaaaaaaa", "bbbbbbbbbbb"])
+})
