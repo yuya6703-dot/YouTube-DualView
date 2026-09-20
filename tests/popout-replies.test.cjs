@@ -120,3 +120,14 @@ test("comments without replies never show a reply button", async (t) => {
   const { replyButton } = await render(t, comment("c3"))
   assert.equal(replyButton(), undefined)
 })
+
+test("the publish time is rendered next to the author for comments and replies", async (t) => {
+  const { container, replyButton, click } = await render(t, { ...comment("c4", 1), publishedAt: "1 年前" })
+  const header = container.querySelector("p")
+  assert.match(header.textContent, /^Author c4\s*1 年前$/)
+  respond = () => ({ ok: true, data: { items: [{ ...reply("r1", "c4"), publishedAt: "3 週間前（編集済み）" }] } })
+  await click(replyButton())
+  assert.match(container.textContent, /Replier r1|Author r1/)
+  assert.ok([...container.querySelectorAll("p")].some((p) => /^Author r1\s*3 週間前（編集済み）$/.test(p.textContent)),
+    "the reply row shows its own publish time")
+})

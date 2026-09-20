@@ -1710,7 +1710,10 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
         )}
         <p className={`flex items-baseline gap-1.5 text-neutral-400 ${cls.meta}`}>
           <span className="truncate font-medium text-neutral-300">{item.author || "—"}</span>
-          {item.publishedAt && <span className="shrink-0 text-neutral-600">{item.publishedAt}</span>}
+          {/* 投稿時刻（「1 年前」等、YouTube 側の文言をそのまま）。以前は neutral-600 で背景との
+              コントラストが 2.3:1 しかなく、12px では実質見えなかった（2026-09-20 報告）。
+              YouTube 本体の副次テキスト（#aaa ≒ 7.7:1）に合わせて neutral-400（7.1:1）にする。 */}
+          {item.publishedAt && <span className="shrink-0 text-neutral-400">{item.publishedAt}</span>}
         </p>
         <p
           className={`mt-0.5 whitespace-pre-wrap break-words leading-snug text-neutral-300 ${cls.body}${
