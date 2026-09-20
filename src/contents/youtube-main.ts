@@ -1755,10 +1755,13 @@ function unclipAncestors(
     // ★安全装置その2: プレイヤーを含む祖先のスタイルは書き換えない。
     //   上の安全装置は「対象要素がプレイヤーを含むか」しか見ていなかったが、
     //   実際にはここで祖先を遡って display/contain/overflow を強制変更している。
-    //   関連動画欄やコメント欄の祖先には必ずプレイヤーを含む要素（#columns や
-    //   ytd-watch-flexy）があり、そこを触るとYouTube内部のサイズ計算が壊れて
-    //   映像が真っ暗なまま復帰しなくなる（2026-08-19 実機で発生）。
-    //   祖先を解除できなくても交差判定に失敗するだけで、呼び出し側のリトライに委ねられる。
+    //   関連動画欄やコメント欄の祖先には必ずプレイヤーを含む要素（ytd-watch-flexy）があり、
+    //   そこを触るとYouTube内部のサイズ計算が壊れて映像が真っ暗なまま復帰しなくなる
+    //   （2026-08-19 実機で発生）。祖先を解除できなくても交差判定に失敗するだけで、
+    //   呼び出し側のリトライに委ねられる。
+    //   ★ #columns は通常表示ではプレイヤーを含むが、シアター／全画面ではプレイヤーが
+    //     #full-bleed-container 側へ移るため含まない（2026-09-20 実DOMで確認）。その場合は
+    //     下の「非表示の祖先」の扱いで、場所を取らない形にだけ戻す。
     if (player && parent.contains(player)) continue
     if (seen.has(parent)) continue
     seen.add(parent)
@@ -1766,9 +1769,9 @@ function unclipAncestors(
     const clipsDescendants = [computed.overflow, computed.overflowX, computed.overflowY]
       .some((value) => value === "hidden" || value === "clip")
     const contain = computed.getPropertyValue("contain")
+    const unrendered = parent.hidden || computed.display === "none"
     if (
-      parent.hidden ||
-      computed.display === "none" ||
+      unrendered ||
       computed.visibility === "hidden" ||
       computed.getPropertyValue("content-visibility") !== "visible" ||
       clipsDescendants ||
@@ -1776,24 +1779,45 @@ function unclipAncestors(
     ) {
       const properties = [
         "display", "visibility", "content-visibility",
-        "overflow-x", "overflow-y", "contain"
+        "overflow-x", "overflow-y", "contain",
+        ...UNRENDERED_ANCESTOR_SIZE_PROPERTIES
       ] as const
       const snapshot = snapshotProperties(parent, properties)
       snapshots.push(snapshot)
       forceHidden(snapshot, false)
-      if (computed.display === "none") forceProperty(snapshot, "display", "block")
+      if (unrendered) {
+        // ★ 非表示（display:none / hidden）の祖先は「描画はするが場所を取らない」形で戻す。
+        //   全画面では YouTube が #columns（コメント欄・関連動画欄の親）を display:none にしており、
+        //   プレイヤーは #full-bleed-container 側にあるため上の安全装置では守られない。
+        //   素直に display:block へ戻すと数千px のコメント欄が全画面プレイヤーの下に現れて文書が
+        //   スクロール可能になり（実測: scrollHeight 1136→5634）、スクロールバー出現＝ビューポート幅の
+        //   変化として YouTube 側のレイアウト再計算（プレイヤーの寸法計算を含む）を誘発する
+        //   （2026-09-20「全画面の映像が 428×240 に縮んだまま戻らない」報告）。
+        //   高さ0＋overflow:hidden なら、position:fixed の対象（包含ブロックは viewport なので祖先の
+        //   overflow には切り取られない）だけが画面に出て、文書の高さもスクロールバーも変わらない。
+        forceProperty(snapshot, "display", "block")
+        for (const name of UNRENDERED_ANCESTOR_SIZE_PROPERTIES) forceProperty(snapshot, name, "0px")
+        forceProperty(snapshot, "overflow-x", "hidden")
+        forceProperty(snapshot, "overflow-y", "hidden")
+      } else {
+        if (computed.overflowX === "hidden" || computed.overflowX === "clip") {
+          forceProperty(snapshot, "overflow-x", "visible")
+        }
+        if (computed.overflowY === "hidden" || computed.overflowY === "clip") {
+          forceProperty(snapshot, "overflow-y", "visible")
+        }
+      }
       if (computed.visibility === "hidden") forceProperty(snapshot, "visibility", "visible")
       forceProperty(snapshot, "content-visibility", "visible")
-      if (computed.overflowX === "hidden" || computed.overflowX === "clip") {
-        forceProperty(snapshot, "overflow-x", "visible")
-      }
-      if (computed.overflowY === "hidden" || computed.overflowY === "clip") {
-        forceProperty(snapshot, "overflow-y", "visible")
-      }
       if (contain !== "" && contain !== "none") forceProperty(snapshot, "contain", "none")
     }
   }
 }
+
+/** 非表示の祖先を「場所を取らない」形で描画に戻すときに 0 にする寸法（unclipAncestors）。 */
+const UNRENDERED_ANCESTOR_SIZE_PROPERTIES = [
+  "height", "min-height", "padding-top", "padding-bottom", "margin-top", "margin-bottom"
+] as const
 
 /** 縦に並べる1枠の高さ（24px の要素＋隙間）。複数対象を同時に画面内へ置くときに使う。 */
 const NUDGE_TILE_PX = 28

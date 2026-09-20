@@ -406,3 +406,25 @@ test("empty avatars are nudged in one batch with separate tiles, then restored",
   await h.advance(400)
   assert.equal(hosts.filter((el) => el.style.position === "fixed").length, 0, "styles are restored after the dwell")
 })
+
+// 全画面では YouTube が #columns（コメント欄・関連動画欄の親。プレイヤーは #full-bleed-container 側）を
+// display:none にする。nudge はこの祖先を描画に戻す必要があるが、場所を取る形で戻すと文書が
+// スクロール可能になり、YouTube 側のレイアウト再計算（プレイヤーの寸法計算）を誘発する。
+test("a display:none ancestor is rendered without taking space while its descendants are nudged", async (t) => {
+  const ids = ["a", "b", "c"]
+  const many = ids.map((id) => thread(id).replace('<img src="https://yt3.ggpht.com/avatar.jpg">', "<img>")).join("")
+  const h = setup(t, `<div id="columns" style="display: none">${section(many)}</div>`)
+  h.start()
+  await h.advance(600)
+  const columns = h.doc.querySelector("#columns")
+  const hosts = [...h.doc.querySelectorAll("#author-thumbnail")]
+  assert.equal(hosts.filter((el) => el.style.position === "fixed").length, ids.length, "targets are placed in the viewport")
+  assert.equal(columns.style.getPropertyValue("display"), "block", "the hidden ancestor is rendered")
+  assert.equal(columns.style.getPropertyValue("height"), "0px", "…but takes no space")
+  assert.equal(columns.style.getPropertyValue("overflow-y"), "hidden", "…and its content does not extend the document")
+  assert.equal(columns.style.getPropertyPriority("height"), "important")
+  await h.advance(400)
+  assert.equal(columns.style.getPropertyValue("display"), "none", "the original display is restored")
+  assert.equal(columns.style.getPropertyValue("height"), "", "temporary sizing is removed")
+  assert.equal(columns.style.getPropertyValue("overflow-y"), "", "temporary clipping is removed")
+})
