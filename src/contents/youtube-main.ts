@@ -1685,6 +1685,8 @@ function clickContinuationControl(
 
 type StyleSnapshot = {
   el: HTMLElement
+  /** この snapshot を共有している nudge の数。最後の1つが復元する。 */
+  refs: number
   hidden: boolean
   forcedHidden: boolean | null
   properties: Array<{
@@ -1696,18 +1698,42 @@ type StyleSnapshot = {
   }>
 }
 
+/**
+ * いま nudge 中の要素（対象・祖先を問わず）の snapshot。複数の nudge が同時に同じ要素を
+ * 必要とするとき、後発は先発の snapshot を共有し、最後に終わる nudge が原状へ戻す。
+ * ★ 共有しないと、後発が先発の「一時スタイル」を原状として撮り直してしまい、
+ *   (1) 先発が対象に掛けた overflow:hidden（fixed 24px の箱の中身を隠す）を「クリップ」と見て
+ *       visible に剥がし、箱から中身が溢れて映像の上に描画される（全画面で関連動画を再生した
+ *       直後、0件のコメント欄の nudge 中にアイコン補完の nudge が始まると一瞬コメント欄が出る。
+ *       2026-09-21 実DOMで再現）
+ *   (2) 復元時に先発の一時スタイル（overflow:hidden !important 等）を書き戻して残留する
+ *   の2つが起きる。activeNudges は「同じ対象」しか守らない（祖先の取り合いは守れない）。
+ */
+const activeSnapshots = new Map<HTMLElement, StyleSnapshot>()
+
 const TARGET_NUDGE_PROPERTIES = [
   "position", "top", "right", "bottom", "left", "width", "height",
   "min-width", "min-height", "display", "visibility", "opacity", "z-index",
   "pointer-events", "content-visibility", "contain", "overflow", "transform"
 ] as const
 
-function snapshotProperties(el: HTMLElement, properties: readonly string[]): StyleSnapshot {
-  return {
+/**
+ * 要素の snapshot を取る。別の nudge が既に取っていればそれを共有する（refs を増やす）。
+ * 対象としても祖先としても使えるよう、記録する property は両方の和集合にしておく
+ * （復元は forcedValue を持つ property だけなので、余分に記録しても害はない）。
+ */
+function acquireSnapshot(el: HTMLElement): StyleSnapshot {
+  const shared = activeSnapshots.get(el)
+  if (shared) {
+    shared.refs += 1
+    return shared
+  }
+  const snapshot: StyleSnapshot = {
     el,
+    refs: 1,
     hidden: el.hidden,
     forcedHidden: null,
-    properties: properties.map((name) => ({
+    properties: NUDGE_SNAPSHOT_PROPERTIES.map((name) => ({
       name,
       value: el.style.getPropertyValue(name),
       priority: el.style.getPropertyPriority(name),
@@ -1715,6 +1741,8 @@ function snapshotProperties(el: HTMLElement, properties: readonly string[]): Sty
       forcedPriority: null
     }))
   }
+  activeSnapshots.set(el, snapshot)
+  return snapshot
 }
 
 function forceHidden(snapshot: StyleSnapshot, value: boolean) {
@@ -1732,6 +1760,12 @@ function forceProperty(snapshot: StyleSnapshot, name: string, value: string, pri
 }
 
 function restoreSnapshot(snapshot: StyleSnapshot) {
+  // 他の nudge がまだこの要素を必要としている間は戻さない（最後の1つが戻す）。
+  if (snapshot.refs > 1) {
+    snapshot.refs -= 1
+    return
+  }
+  activeSnapshots.delete(snapshot.el)
   // 介入中にYouTube自身が同じinline値を更新した場合、その新しい値を古いsnapshotで潰さない。
   if (snapshot.forcedHidden === null || snapshot.el.hidden === snapshot.forcedHidden) {
     snapshot.el.hidden = snapshot.hidden
@@ -1769,7 +1803,7 @@ function nudgeIntoViewport(el: HTMLElement, done: () => void, dwellMs = 700) {
   }
   activeNudges.set(el, [done])
 
-  const targetSnapshot = snapshotProperties(el, TARGET_NUDGE_PROPERTIES)
+  const targetSnapshot = acquireSnapshot(el)
   const snapshots: StyleSnapshot[] = [targetSnapshot]
   unclipAncestors(el, player, new Set(), snapshots)
   forceHidden(targetSnapshot, false)
@@ -1808,6 +1842,15 @@ function unclipAncestors(
     if (player && parent.contains(player)) continue
     if (seen.has(parent)) continue
     seen.add(parent)
+    // ★ 別の nudge がこの要素を一時変更中（対象として fixed 24px の箱にしている、または祖先として
+    //   解除している）なら、その状態をそのまま使う。fixed の対象は祖先の overflow に切り取られない
+    //   ので交差判定には十分で、ここで撮り直すと先発の箱の overflow:hidden を剥がしてしまう。
+    const shared = activeSnapshots.get(parent)
+    if (shared) {
+      shared.refs += 1
+      snapshots.push(shared)
+      continue
+    }
     const computed = getComputedStyle(parent)
     const clipsDescendants = [computed.overflow, computed.overflowX, computed.overflowY]
       .some((value) => value === "hidden" || value === "clip")
@@ -1820,12 +1863,7 @@ function unclipAncestors(
       clipsDescendants ||
       (contain !== "" && contain !== "none")
     ) {
-      const properties = [
-        "display", "visibility", "content-visibility",
-        "overflow-x", "overflow-y", "contain",
-        ...UNRENDERED_ANCESTOR_SIZE_PROPERTIES
-      ] as const
-      const snapshot = snapshotProperties(parent, properties)
+      const snapshot = acquireSnapshot(parent)
       snapshots.push(snapshot)
       forceHidden(snapshot, false)
       if (unrendered) {
@@ -1861,6 +1899,13 @@ function unclipAncestors(
 const UNRENDERED_ANCESTOR_SIZE_PROPERTIES = [
   "height", "min-height", "padding-top", "padding-bottom", "margin-top", "margin-bottom"
 ] as const
+
+/** snapshot に記録する property（対象用と祖先用の和集合。acquireSnapshot 参照）。 */
+const NUDGE_SNAPSHOT_PROPERTIES: readonly string[] = Array.from(new Set<string>([
+  ...TARGET_NUDGE_PROPERTIES,
+  "display", "visibility", "content-visibility", "overflow-x", "overflow-y", "contain",
+  ...UNRENDERED_ANCESTOR_SIZE_PROPERTIES
+]))
 
 /** 縦に並べる1枠の高さ（24px の要素＋隙間）。複数対象を同時に画面内へ置くときに使う。 */
 const NUDGE_TILE_PX = 28
@@ -1925,7 +1970,7 @@ function nudgeManyIntoViewport(targets: HTMLElement[], done: () => void, dwellMs
   const snapshots: StyleSnapshot[] = []
   const seen = new Set<Element>()
   fresh.forEach((el, index) => {
-    const targetSnapshot = snapshotProperties(el, TARGET_NUDGE_PROPERTIES)
+    const targetSnapshot = acquireSnapshot(el)
     snapshots.push(targetSnapshot)
     unclipAncestors(el, player, seen, snapshots)
     forceHidden(targetSnapshot, false)
@@ -2537,6 +2582,29 @@ function navigateViaYouTubeRouter(
   }, 700)
 }
 
+/**
+ * 対象動画へ遷移するために押すアンカー。関連動画欄のカードを優先し、無ければプレイヤーの外の
+ * アンカー（再生リスト欄など）。プレイヤー内のアンカーは使わない。
+ * ★ 以前は document 全体の先頭一致だった。YouTube の新しい全画面UIでは、プレイヤー内の
+ *   グリッド（.ytp-fullscreen-grid の a.ytp-modern-videowall-still）が #columns より文書順で
+ *   前にあり、関連動画のすべてで still が先に一致していた（2026-09-21 実DOMで確認）。
+ *   still の click はプレイヤー自身のエンドスクリーン用の遷移（select() → api.Lv）で、
+ *   全画面ではグリッドの状態遷移を伴う。カードのアンカーならページのルーターで遷移する。
+ */
+function findVideoAnchor(videoId: string): HTMLAnchorElement | null {
+  const selector = `a[href*="/watch?v=${CSS.escape(videoId)}"]`
+  const player = q<HTMLElement>(SELECTORS.player.root)
+  const scopes: ParentNode[] = [q(SELECTORS.related.container), document]
+    .filter((scope): scope is HTMLElement => scope !== null)
+  for (const scope of scopes) {
+    for (const anchor of scope.querySelectorAll<HTMLAnchorElement>(selector)) {
+      if (player && player.contains(anchor)) continue
+      return anchor
+    }
+  }
+  return null
+}
+
 function navigateToVideo(videoId: string, generation: number, startSeconds?: number) {
   const url = new URL("/watch", location.origin)
   url.searchParams.set("v", videoId)
@@ -2549,9 +2617,7 @@ function navigateToVideo(videoId: string, generation: number, startSeconds?: num
 
   // hrefを正規URLへ同期的に差し替え、元要素のYouTube管理click listenerを維持する。
   // list/index等の余計なパラメータは引き継がず、tもこのURLと後続seekの両方で担保する。
-  const existing = document.querySelector<HTMLAnchorElement>(
-    `a[href*="/watch?v=${CSS.escape(videoId)}"]`
-  )
+  const existing = findVideoAnchor(videoId)
   if (!existing) {
     // ★ メイン画面がフルスクリーンだと関連動画欄が描画されず、対象動画のアンカーが
     //   DOMに存在しないことがある。ここで location.assign() するとページ全体が

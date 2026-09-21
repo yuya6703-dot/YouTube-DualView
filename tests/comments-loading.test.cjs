@@ -51,6 +51,8 @@ function setup(t, html, video = "current") {
   win.Date.now = () => time
   win.chrome = { runtime: { onConnect: { addListener() {} } } }
   win.process = { env: { NODE_ENV: "test" } }
+  // jsdom has no CSS.escape; the video ids used here are plain [A-Za-z0-9_-].
+  win.CSS = { escape: (value) => String(value).replace(/[^A-Za-z0-9_-]/g, (c) => `\${c}`) }
   let handlers
   const messaging = {
     PORT_PLAYER: "player", STATUS_INTERVAL_MS: 250,
@@ -83,7 +85,7 @@ function setup(t, html, video = "current") {
       bound: () => commentContainerEl,
       items: () => Array.from(commentItemCache.values()),
       loadMoreComments, commentsReachedEnd, commentsAreDefinitelyEmpty,
-      findTopLevelCommentContinuation, stopWatchPageObservers, fetchRelated
+      findTopLevelCommentContinuation, stopWatchPageObservers, fetchRelated, nudgeIntoViewport
     }
   `)
   const port = { postMessage: (event) => events.push(event) }
@@ -520,4 +522,65 @@ test("a zero comment count has no YouTube reason, so the sub window keeps its ge
   await h.advance(15000)
   assert.equal(h.api.state().phase, "done")
   assert.equal(h.api.state().message, undefined)
+})
+
+// ★ 2026-09-21「全画面で関連動画を再生すると一瞬コメント欄が映像を覆う」。
+// 0件のコメント欄を fixed 24px の箱にして画面内へ置く nudge（A）の滞在中に、その箱の中の
+// 要素（アイコン等）を対象にした nudge（B）が始まると、B が祖先の A の箱に見つけた
+// overflow:hidden を「クリップ」として visible に剥がし、箱から中身が溢れて映像の上に出る。
+// 復元順によっては A の一時スタイルが残留もする。実DOMで再現済み。
+test("a nudge inside another nudge's target never lifts that target's clipping, and nothing is left behind", async (t) => {
+  const h = setup(t, `<div id="wrap" style="display: none">${section(thread("c1").replace('<img src="https://yt3.ggpht.com/avatar.jpg">', "<img>"))}</div>`)
+  const comments = h.doc.querySelector("ytd-comments#comments")
+  const avatar = comments.querySelector("#author-thumbnail")
+  const wrap = h.doc.querySelector("#wrap")
+  const finished = []
+  h.api.nudgeIntoViewport(comments, () => finished.push("A"), 300)
+  await h.advance(50)
+  h.api.nudgeIntoViewport(avatar, () => finished.push("B"), 700)
+  // during the overlap: B is in the viewport, A's box still clips its content, the hidden wrapper still takes no space
+  assert.equal(avatar.style.position, "fixed", "B is placed in the viewport")
+  assert.equal(comments.style.position, "fixed")
+  // jsdom does not expand the `overflow` shorthand into computed longhands
+  const overflowY = (el) => h.win.getComputedStyle(el).overflowY || h.win.getComputedStyle(el).overflow
+  assert.equal(overflowY(comments), "hidden", "A's 24px box keeps clipping its content while B runs inside it")
+  assert.equal(overflowY(wrap), "hidden", "the hidden wrapper keeps its zero-height clip")
+  await h.advance(1000)
+  assert.deepEqual(finished, ["A", "B"])
+  for (const el of [comments, avatar, wrap]) {
+    assert.equal(el.getAttribute("style") ?? "", el === wrap ? "display: none;" : "", `${el.id || el.tagName} carries no leftover inline style`)
+  }
+})
+
+// 再生ボタンは関連動画カードのアンカーを押す。新しい全画面UIではプレイヤー内のグリッド
+// （.ytp-fullscreen-grid の videowall still）が #columns より文書順で前にあり、
+// document 全体の先頭一致だとそちらを掴む（2026-09-21 実DOMで関連動画6件すべてが still に一致）。
+// still のクリックはプレイヤー自身のエンドスクリーン用の遷移で、全画面グリッドの状態遷移を伴う。
+test("playing a related video clicks its card in the related list, not the player's videowall still", async (t) => {
+  const h = setup(t, `<div id="related"><ytd-watch-next-secondary-results-renderer><div id="items">
+    ${lockupCard("aaaaaaaaaaa", "Title A", "Channel A", lockupMetaRow("168万", "5 か月前"))}
+  </div></ytd-watch-next-secondary-results-renderer></div>`)
+  h.doc.querySelector("#movie_player").innerHTML =
+    '<div class="ytp-fullscreen-grid"><a class="ytp-modern-videowall-still" href="/watch?v=aaaaaaaaaaa&list=RDaaaaaaaaaaa"></a></div>'
+  const clicked = []
+  for (const a of h.doc.querySelectorAll("a[href]")) {
+    a.addEventListener("click", (e) => { e.preventDefault(); clicked.push(a.closest("#movie_player") ? "still" : "card") })
+  }
+  h.handlers.NAVIGATE_TO_VIDEO({ videoId: "aaaaaaaaaaa" })
+  assert.deepEqual(clicked, ["card"])
+})
+
+test("without a related card the player's still is still not clicked; YouTube's router is asked instead", async (t) => {
+  const h = setup(t, "")
+  h.doc.querySelector("#movie_player").innerHTML =
+    '<div class="ytp-fullscreen-grid"><a class="ytp-modern-videowall-still" href="/watch?v=aaaaaaaaaaa"></a></div>'
+  const app = h.doc.body.appendChild(h.doc.createElement("ytd-app"))
+  const still = h.doc.querySelector("a.ytp-modern-videowall-still")
+  let stillClicks = 0
+  still.addEventListener("click", (e) => { e.preventDefault(); stillClicks++ })
+  const routed = []
+  app.addEventListener("yt-navigate", (e) => routed.push(e.detail?.endpoint?.watchEndpoint?.videoId))
+  h.handlers.NAVIGATE_TO_VIDEO({ videoId: "aaaaaaaaaaa" })
+  assert.equal(stillClicks, 0)
+  assert.deepEqual(routed, ["aaaaaaaaaaa"])
 })
