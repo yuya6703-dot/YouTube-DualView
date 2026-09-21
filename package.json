@@ -1,7 +1,7 @@
 {
   "name": "youtube-dualview",
   "displayName": "DualView for YouTube",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "サブモニタからYouTubeを操作する個人用ツール",
   "author": "miguel",
   "private": true,
