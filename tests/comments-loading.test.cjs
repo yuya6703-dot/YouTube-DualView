@@ -584,3 +584,90 @@ test("without a related card the player's still is still not clicked; YouTube's 
   assert.equal(stillClicks, 0)
   assert.deepEqual(routed, ["aaaaaaaaaaa"])
 })
+
+// ★ 2026-10-15「コメントの自動読み込みがされない。メイン画面でコメントを見ないとサブに表示されない」。
+// YouTube が watch ページを骨組み(skeleton)＋段階的ハイドレーションに変えた。実DOMで確認した事実
+// （2026-10-15、ブラウザペイン・スクロールなし）:
+//   1. 最初はコメント欄も #below も存在しない（ytd-watch-flexy すら後から生成される）
+//   2. 少し後に #below と ytd-comments#comments が現れるが、コメント欄は [hidden] の中にあり空
+//   3. さらに後に hidden が外れ、#contents に ytd-continuation-item-renderer が入る。その中身は
+//      新要素 yt-ghost-comments（スケルトンのカード）
+//   4. この continuation を画面内へ置くと YouTube は最初のバッチを読み込む（実ページで 0件→6件 を確認）。
+//      スクロールしない限り、それ以外では永久に読み込まれない
+//   5. パネル側（engagement-panel-comments-section の ytd-comments。id なし）は最初から存在し、
+//      独自の continuation を持つ。通常欄が [hidden] の間、findCommentSection はこちらへ
+//      フォールバックしてしまう
+// ここでは 4 を「YouTubeの契約」としてモデル化する（通常欄の continuation が画面内に入ったときだけ
+// 読み込む）。拡張が別の要素を刺激した場合や、continuation が現れる前に諦めた場合は何も起きない
+// ＝報告どおり「メイン画面でコメントを開くまでサブに出ない」になる。
+const lateHydratingWatchPage = (h) => {
+  const flexy = h.doc.querySelector("ytd-watch-flexy")
+  const inline = () => h.doc.querySelector("ytd-comments#comments")
+  return {
+    // 実ページと同じく、パネル側のコメント欄は最初から存在する
+    panel() {
+      flexy.insertAdjacentHTML("beforeend", `
+        <ytd-engagement-panel-section-list-renderer target-id="engagement-panel-comments-section"
+          visibility="ENGAGEMENT_PANEL_VISIBILITY_HIDDEN">
+          <ytd-comments><ytd-item-section-renderer><div id="contents">
+            <ytd-continuation-item-renderer id="panel-continuation"></ytd-continuation-item-renderer>
+          </div></ytd-item-section-renderer></ytd-comments>
+        </ytd-engagement-panel-section-list-renderer>`)
+    },
+    shell() { // #below とコメント欄は出るが、まだ [hidden] の中で空
+      const below = h.doc.createElement("div")
+      below.id = "below"
+      below.innerHTML = '<div hidden><ytd-comments id="comments"></ytd-comments></div>'
+      flexy.appendChild(below)
+    },
+    hydrate() { // hidden が外れ、ghost 入りの continuation が入る。以後が「読み込める」状態
+      inline().parentElement.removeAttribute("hidden")
+      inline().innerHTML = `<ytd-item-section-renderer id="sections"><div id="contents">
+        <ytd-continuation-item-renderer><div id="ghost-comment-section"><yt-ghost-comments></yt-ghost-comments></div></ytd-continuation-item-renderer>
+      </div></ytd-item-section-renderer>`
+      // YouTube の契約: 通常欄の continuation が画面内に置かれたときだけ最初のバッチを入れる
+      const continuation = inline().querySelector("ytd-continuation-item-renderer")
+      const observer = new h.win.MutationObserver(() => {
+        if (continuation.style.position !== "fixed") return
+        observer.disconnect()
+        continuation.querySelector("#ghost-comment-section")?.remove()
+        inline().querySelector("#contents").insertAdjacentHTML("afterbegin", thread("c1") + thread("c2"))
+      })
+      observer.observe(continuation, { attributes: true, attributeFilter: ["style"] })
+      return continuation
+    }
+  }
+}
+
+test("comments load by themselves on a watch page that hydrates in stages", async (t) => {
+  const h = setup(t, "")
+  h.doc.querySelector("#below").remove() // 骨組みだけ。刺激できる要素はまだ無い
+  const page = lateHydratingWatchPage(h)
+  page.panel()
+  h.start()
+
+  await h.advance(7000)
+  page.shell()
+  await h.advance(7000)
+  page.hydrate()
+
+  // メイン画面には触れない。拡張が自力で最初のバッチまで到達しなければならない
+  for (let i = 0; i < 40 && h.api.items().length === 0; i++) await h.advance(500)
+  assert.deepEqual(Array.from(h.api.items(), (item) => item.id), ["lc:c1", "lc:c2"],
+    "the first batch reaches the sub window without touching the main window")
+  assert.notEqual(h.api.state().phase, "error")
+})
+
+test("the hidden comments panel is not mistaken for the real section while the page is still hydrating", async (t) => {
+  const h = setup(t, "")
+  h.doc.querySelector("#below").remove()
+  const page = lateHydratingWatchPage(h)
+  page.panel()
+  h.start()
+  await h.advance(7000)
+  page.shell()
+  await h.advance(3000)
+  // この時点で通常欄は [hidden]。パネルを掴んで、その continuation を刺激してはならない
+  assert.equal(h.doc.querySelector("#panel-continuation").style.position, "",
+    "the hidden panel's continuation is never placed in the viewport")
+})

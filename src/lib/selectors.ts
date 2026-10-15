@@ -281,16 +281,42 @@ export function qa<T extends Element = HTMLElement>(
  * 別の ytd-comments（idのないパネル側）が読み込み先になる場合がある。
  * 画面外・全画面中でも取得するので、座標やサイズを可否判定に使わない。
  */
+/**
+ * 段階的ハイドレーション中の「空の器」か。
+ * ★ YouTubeは2026-10頃から watch ページを骨組み(skeleton)から段階的に組み立てるようになり、
+ *   通常のコメント欄は最初 `[hidden]` の空要素として現れ、数秒後に中身
+ *   （yt-ghost-comments 入りの continuation → 実際のコメント）が入って hidden が外れる
+ *   （2026-10-15 実DOMで確認）。この「まだ出来ていないだけの欄」を、
+ *   前の動画のコメントが残った旧DOMや「コメントはオフになっています。」の欄と区別する。
+ *   中身が何も無いときだけ placeholder とみなす。
+ */
+function isHydrationPlaceholder(section: Element): boolean {
+  return section.querySelector(HYDRATION_PLACEHOLDER_CONTENT) === null
+}
+
+/** placeholder でない（＝中身がある）と判断する要素。スレッド本体と0件メッセージ。 */
+const HYDRATION_PLACEHOLDER_CONTENT = "ytd-comment-thread-renderer, ytd-message-renderer"
+
 export function findCommentSection(
   videoId: string | null,
   root: ParentNode = document
 ): HTMLElement | null {
   let panelFallback: HTMLElement | null = null
+  // 通常欄が「まだ出来ていない」だけなら、未展開パネルで代用せずに待つ（下の return を参照）。
+  let awaitingHydration = false
   for (const section of root.querySelectorAll<HTMLElement>(SELECTORS.comments.section.join(","))) {
-    if (section.closest("[hidden]")) continue
     // #comments が ytd-comments の内側にある世代でも、二重に候補へ数えない。
     const owner = section.closest("ytd-comments")
     if (owner && owner !== section) continue
+    if (section.closest("[hidden]")) {
+      if (
+        !section.closest("ytd-engagement-panel-section-list-renderer") &&
+        isHydrationPlaceholder(section)
+      ) {
+        awaitingHydration = true
+      }
+      continue
+    }
     const watch = section.closest("ytd-watch-flexy")
     const ownerVideoId = watch?.getAttribute("video-id")
     if (videoId && ownerVideoId && ownerVideoId !== videoId) continue
@@ -318,6 +344,16 @@ export function findCommentSection(
     }
     return section
   }
+  // ★ 通常欄がハイドレーション待ちの空の器として存在する間は、未展開パネルを返さない。
+  //   返すと、呼び出し側がパネルの continuation を画面内へ置いて読み込みを起動してしまい、
+  //   YouTubeは**非表示のパネルの中へ**コメントを入れる。実DOMで確認（2026-10-15）:
+  //   パネル側9件・通常欄0件、通常欄の continuation と ghost は消費されて消える。
+  //   サブ画面は通常欄から読むため、読み込んだはずのコメントが永久に届かなくなる
+  //   （報告「メイン画面でコメントを見ないとサブに表示されない」の原因）。
+  //   null を返して待てば、通常欄が出来た時点でそちらを掴んで起動できる。
+  //   前の動画のコメントが残っている旧DOMや0件メッセージの欄は placeholder ではないので、
+  //   従来どおりパネルで読み込みを起動できる。
+  if (awaitingHydration) return null
   return panelFallback
 }
 
@@ -559,7 +595,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 73
+export const DIAGNOSE_VERSION = 74
 
 export type DiagnoseReport = {
   v: number
