@@ -247,3 +247,12 @@ test("live streams are shared without a start position", async (t) => {
   assert.equal(container.querySelector("input[type=checkbox]"), null)
   assert.equal(input().value, "https://youtu.be/aaaaaaaaaaa")
 })
+
+test("split view and fullscreen comments show the title inline next to the buttons", async (t) => {
+  const { container, button } = await renderActions(t, {
+    inlineTitle: "サンプル動画", rating: { liked: false, disliked: false, likeCount: "1.2万" }
+  })
+  const row = container.querySelector("div > div")
+  assert.equal(row.querySelector("p")?.textContent, "サンプル動画")
+  assert.ok(row.contains(button("高く評価")) && row.contains(button("共有")), "the title shares one row with the buttons")
+})

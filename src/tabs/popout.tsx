@@ -633,6 +633,20 @@ export default function Popout() {
   const displayTime = seeking ?? smoothTime
   const speed = status?.playbackRate ?? 1
 
+  // 評価・共有。どの表示モードでも出す。動画が変わったら共有欄の開閉や開始位置を持ち越さない
+  const videoActions = (inlineTitle?: string) => currentVideoId && (
+    <VideoActions
+      key={currentVideoId}
+      videoId={currentVideoId}
+      rating={status?.rating ?? null}
+      live={live}
+      currentTime={displayTime}
+      tabId={tabId}
+      t={t}
+      inlineTitle={inlineTitle}
+    />
+  )
+
   return (
     <div className="flex h-screen flex-col bg-neutral-900 text-neutral-100 antialiased">
       {/* ヘッダー兼検索バー —— 縦の表示領域を稼ぐためタイトル行は廃止し、状態表示もここに統合した */}
@@ -714,6 +728,7 @@ export default function Popout() {
           </p>
         ) : splitView ? (
           <div className="flex h-full flex-col">
+            {videoActions(status?.title ?? "")}
             {/* 仕切りをドラッグして比率を変えられる。それぞれ独立してスクロールする */}
             <div
               ref={splitBoxRef}
@@ -798,6 +813,7 @@ export default function Popout() {
           </div>
         ) : commentsFullscreen ? (
           <div className="flex h-full flex-col">
+            {videoActions(status?.title ?? "")}
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <p className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-neutral-300">
                 <MessageSquare size={13} />
@@ -865,18 +881,7 @@ export default function Popout() {
               )}
             </button>
 
-            {/* 評価・共有。動画が変わったら共有欄の開閉や開始位置を持ち越さない */}
-            {currentVideoId && (
-              <VideoActions
-                key={currentVideoId}
-                videoId={currentVideoId}
-                rating={status?.rating ?? null}
-                live={live}
-                currentTime={displayTime}
-                tabId={tabId}
-                t={t}
-              />
-            )}
+            {videoActions()}
 
             {/* 折りたたみ中は現在の再生状態だけ1行で表示する */}
             {!playerOpen && (
@@ -1342,13 +1347,15 @@ function buildShareUrl(videoId: string, startSeconds: number | null): string {
  * ★ 共有はメイン画面の共有ダイアログを開かない（全画面での視聴を邪魔するため）。
  *   リンクをここで組み立ててクリップボードへコピーする。外部への送信は無い。
  */
-function VideoActions({ videoId, rating, live, currentTime, tabId, t }: {
+function VideoActions({ videoId, rating, live, currentTime, tabId, t, inlineTitle }: {
   videoId: string
   rating: VideoRating | null
   live: boolean
   currentTime: number
   tabId: number | null
   t: Dictionary
+  // 分割表示・コメント全画面用。タイトル欄が無い表示なので、ボタンの左にタイトルを1行で出す
+  inlineTitle?: string | undefined
 }) {
   const [rateBusy, setRateBusy] = useState(false)
   const [rateError, setRateError] = useState<string | null>(null)
@@ -1389,8 +1396,13 @@ function VideoActions({ videoId, rating, live, currentTime, tabId, t }: {
   const pillButton = "flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition disabled:opacity-40"
 
   return (
-    <div className="mb-4">
+    <div className={inlineTitle === undefined ? "mb-4" : "mb-3 shrink-0"}>
       <div className="flex flex-wrap items-center gap-2">
+        {inlineTitle !== undefined && (
+          <p title={inlineTitle} className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-200">
+            {inlineTitle || "—"}
+          </p>
+        )}
         {rating && (
           <div role="group" aria-label={t.ratingGroupLabel} className="flex items-center overflow-hidden rounded-full bg-neutral-800">
             <button
