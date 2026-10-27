@@ -20,7 +20,21 @@ export const SELECTORS = {
 
   meta: {
     title: ["#title h1 yt-formatted-string", "h1.ytd-watch-metadata", "h1.title yt-formatted-string"],
-    channel: ["#owner #channel-name a", "ytd-channel-name#channel-name a", "#upload-info #channel-name a"]
+    channel: ["#owner #channel-name a", "ytd-channel-name#channel-name a", "#upload-info #channel-name a"],
+    // 動画の高評価/低評価。押下状態は aria-pressed、件数はボタン内の表示文言。
+    // ★ ytd-watch-metadata に絞る。新しい全画面UIはプレイヤー内にも評価ボタンを持つことがあり、
+    //   絞らないと文書順でそちらが先に一致し得る（findVideoAnchor の still と同じ罠）。
+    //   ※ 実機での確認前。壊れていたらセレクタ診断の meta.likeButton / meta.dislikeButton に出る。
+    likeButton: [
+      "ytd-watch-metadata like-button-view-model button",
+      "ytd-watch-metadata #segmented-like-button button",
+      "#top-level-buttons-computed like-button-view-model button"
+    ],
+    dislikeButton: [
+      "ytd-watch-metadata dislike-button-view-model button",
+      "ytd-watch-metadata #segmented-dislike-button button",
+      "#top-level-buttons-computed dislike-button-view-model button"
+    ]
   },
 
   related: {
@@ -595,7 +609,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 74
+export const DIAGNOSE_VERSION = 75
 
 export type DiagnoseReport = {
   v: number

@@ -1,6 +1,6 @@
 /**
  * src/tabs/popout.tsx → build後 tabs/popout.html
- * サブ画面: プレイヤー操作、関連動画、通常コメント、検索、診断、次に再生キュー、
+ * サブ画面: プレイヤー操作、動画の評価・共有、関連動画、通常コメント、検索、診断、次に再生キュー、
  * タイムスタンプメモを表示する。
  */
 import {
@@ -21,7 +21,7 @@ import {
   verticalListSortingStrategy
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Check, ChevronDown, ChevronUp, ClipboardCopy, Columns2, CornerDownRight, Expand, Eye, GripVertical, ListPlus, ListVideo, Loader2, Maximize2, MessageSquare, Minimize2, Pause, Pin, Play, Plus, RefreshCw, RotateCcw, RotateCw, Rows2, Search, Shrink, Stethoscope, StickyNote, ThumbsUp, Trash2, Volume2, VolumeX, X } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, ClipboardCopy, Columns2, CornerDownRight, Expand, Eye, GripVertical, ListPlus, ListVideo, Loader2, Maximize2, MessageSquare, Minimize2, Pause, Pin, Play, Plus, RefreshCw, RotateCcw, RotateCw, Rows2, Search, Share2, Shrink, Stethoscope, StickyNote, ThumbsDown, ThumbsUp, Trash2, Volume2, VolumeX, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   DEFAULT_RELATED_DISPLAY_SIZE,
@@ -36,7 +36,9 @@ import {
   type QueueItem,
   type RelatedDisplaySize,
   type Settings,
-  type TimestampNote
+  type TimestampNote,
+  type VideoRating,
+  type VideoRatingAction
 } from "~lib/messaging"
 import { translateText } from "~lib/deepl"
 import { FEATURES } from "~lib/features"
@@ -842,7 +844,7 @@ export default function Popout() {
             {/* 動画情報（クリックでプレイヤー全体を折りたたむ） */}
             <button
               onClick={() => setPlayerOpen((v) => !v)}
-              className="mb-4 flex w-full items-start justify-between gap-3 text-left">
+              className="mb-3 flex w-full items-start justify-between gap-3 text-left">
               <div className="min-w-0">
                 <p className="line-clamp-2 text-base font-medium leading-snug">
                   {status?.title || "—"}
@@ -862,6 +864,19 @@ export default function Popout() {
                 <ChevronDown size={16} className="mt-1 shrink-0 text-neutral-500" />
               )}
             </button>
+
+            {/* 評価・共有。動画が変わったら共有欄の開閉や開始位置を持ち越さない */}
+            {currentVideoId && (
+              <VideoActions
+                key={currentVideoId}
+                videoId={currentVideoId}
+                rating={status?.rating ?? null}
+                live={live}
+                currentTime={displayTime}
+                tabId={tabId}
+                t={t}
+              />
+            )}
 
             {/* 折りたたみ中は現在の再生状態だけ1行で表示する */}
             {!playerOpen && (
@@ -1310,6 +1325,142 @@ function StepBtn({ onClick, children }: { onClick: () => void; children: React.R
       className="h-8 w-8 rounded bg-neutral-800 text-lg leading-none transition hover:bg-neutral-700 active:scale-95">
       {children}
     </button>
+  )
+}
+
+/** YouTube の共有ダイアログと同じ形のリンク。開始位置は `?t=秒`。 */
+function buildShareUrl(videoId: string, startSeconds: number | null): string {
+  const url = new URL(`https://youtu.be/${encodeURIComponent(videoId)}`)
+  if (startSeconds !== null && startSeconds > 0) url.searchParams.set("t", String(Math.floor(startSeconds)))
+  return url.href
+}
+
+/**
+ * 動画の評価と共有。
+ * ★ 評価は楽観的に切り替えない。表示は STATUS の rating（メイン画面のDOM）だけを正とし、
+ *   押した結果も CS が読み戻して STATUS で送り直す（コメントのいいねと同じ方針）。
+ * ★ 共有はメイン画面の共有ダイアログを開かない（全画面での視聴を邪魔するため）。
+ *   リンクをここで組み立ててクリップボードへコピーする。外部への送信は無い。
+ */
+function VideoActions({ videoId, rating, live, currentTime, tabId, t }: {
+  videoId: string
+  rating: VideoRating | null
+  live: boolean
+  currentTime: number
+  tabId: number | null
+  t: Dictionary
+}) {
+  const [rateBusy, setRateBusy] = useState(false)
+  const [rateError, setRateError] = useState<string | null>(null)
+
+  const rate = async (action: VideoRatingAction) => {
+    if (tabId === null || rateBusy) return
+    setRateBusy(true)
+    setRateError(null)
+    const res = await askContent(tabId, "VIDEO_RATE", { action })
+    setRateBusy(false)
+    if (isErr(res)) setRateError(t.errCommMain)
+    else if (!res.data.applied) setRateError(t.errRateFailed)
+  }
+
+  // 開始位置は共有欄を開いた時点の再生位置で固定する（YouTube の共有ダイアログと同じ）
+  const [shareOpen, setShareOpen] = useState(false)
+  const [startAt, setStartAt] = useState(0)
+  const [withStart, setWithStart] = useState(false)
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle")
+  const shareUrl = buildShareUrl(videoId, withStart && !live ? startAt : null)
+
+  const toggleShare = () => {
+    if (!shareOpen) setStartAt(Math.floor(currentTime))
+    setCopyState("idle")
+    setShareOpen(!shareOpen)
+  }
+
+  const copyShareUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      setCopyState("copied")
+      window.setTimeout(() => setCopyState("idle"), 2000)
+    } catch {
+      setCopyState("failed")
+    }
+  }
+
+  const pillButton = "flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition disabled:opacity-40"
+
+  return (
+    <div className="mb-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {rating && (
+          <div role="group" aria-label={t.ratingGroupLabel} className="flex items-center overflow-hidden rounded-full bg-neutral-800">
+            <button
+              onClick={() => void rate("like")}
+              disabled={tabId === null || rateBusy}
+              aria-pressed={rating.liked}
+              aria-label={rating.liked ? t.unlikeVideo : t.likeVideo}
+              title={rating.liked ? t.unlikeVideo : t.likeVideo}
+              className={`${pillButton} hover:bg-neutral-700 ${rating.liked ? "text-neutral-50" : "text-neutral-300"}`}>
+              <ThumbsUp size={14} fill={rating.liked ? "currentColor" : "none"} />
+              {rating.likeCount && <span className="tabular-nums">{rating.likeCount}</span>}
+            </button>
+            <span className="h-5 w-px bg-neutral-700" aria-hidden="true" />
+            <button
+              onClick={() => void rate("dislike")}
+              disabled={tabId === null || rateBusy}
+              aria-pressed={rating.disliked}
+              aria-label={rating.disliked ? t.undislikeVideo : t.dislikeVideo}
+              title={rating.disliked ? t.undislikeVideo : t.dislikeVideo}
+              className={`${pillButton} hover:bg-neutral-700 ${rating.disliked ? "text-neutral-50" : "text-neutral-300"}`}>
+              <ThumbsDown size={14} fill={rating.disliked ? "currentColor" : "none"} />
+            </button>
+          </div>
+        )}
+        <button
+          onClick={toggleShare}
+          aria-expanded={shareOpen}
+          className={`${pillButton} rounded-full bg-neutral-800 text-neutral-300 hover:bg-neutral-700`}>
+          <Share2 size={14} />
+          {t.share}
+        </button>
+      </div>
+      {rateError && <p className="mt-1.5 text-[11px] leading-snug text-red-400">{rateError}</p>}
+
+      {shareOpen && (
+        <div className="mt-2 rounded-lg bg-neutral-800 p-2.5">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              readOnly
+              value={shareUrl}
+              aria-label={t.shareLinkLabel}
+              onFocus={(e) => e.currentTarget.select()}
+              className="min-w-0 flex-1 rounded bg-neutral-900 px-2 py-1 font-mono text-[11px] text-neutral-300 focus:outline-none focus:ring-1 focus:ring-neutral-600"
+            />
+            <button
+              onClick={() => void copyShareUrl()}
+              className="flex shrink-0 items-center gap-1 rounded bg-neutral-100 px-2.5 py-1 text-[11px] font-medium text-neutral-900 transition hover:bg-white active:scale-95">
+              {copyState === "copied" ? <Check size={12} /> : <ClipboardCopy size={12} />}
+              {copyState === "copied" ? t.copied : t.copyLink}
+            </button>
+          </div>
+          {!live && (
+            <label className="mt-2 flex w-fit cursor-pointer items-center gap-1.5 text-[11px] tabular-nums text-neutral-400">
+              <input
+                type="checkbox"
+                checked={withStart}
+                onChange={(e) => {
+                  setWithStart(e.target.checked)
+                  setCopyState("idle")
+                }}
+                className="accent-red-600"
+              />
+              {t.shareStartAt(fmt(startAt))}
+            </label>
+          )}
+          {copyState === "failed" && <p className="mt-1.5 text-[11px] text-red-400">{t.errCopyFailed}</p>}
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -53,6 +53,9 @@ Watch YouTube fullscreen on one monitor while browsing related videos, comments,
 ・再生コントロール
 　再生／一時停止、シーク、音量、再生速度（0.1刻み）をサブ画面から操作
 
+・評価・共有
+　高評価／低評価をサブ画面から。共有リンク（開始位置つきも可）をコピー
+
 ・関連動画
 　メイン画面をスクロールせずに関連動画を一覧表示（再生回数・投稿時期つき）。クリックでそのまま再生。
 　全画面表示のまま動画を切り替えられます
@@ -105,6 +108,9 @@ the video or leave fullscreen.
 
 ・Playback controls
 　Play/pause, seek, volume, and playback speed (0.1 steps) from the sub window
+
+・Rating & sharing
+　Like or dislike the video, and copy a share link (optionally with a start time)
 
 ・Related videos
 　Browse related videos without scrolling the main page. Click to play — the

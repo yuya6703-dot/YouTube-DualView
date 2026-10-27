@@ -68,6 +68,19 @@ export interface Dictionary {
   playbackSpeed: string
   refresh: string
 
+  // 動画の評価・共有
+  ratingGroupLabel: string
+  likeVideo: string
+  unlikeVideo: string
+  dislikeVideo: string
+  undislikeVideo: string
+  errRateFailed: string
+  share: string
+  shareLinkLabel: string
+  shareStartAt: (time: string) => string
+  copyLink: string
+  errCopyFailed: string
+
   // 次に再生
   queueEmptyHint: string
 
@@ -222,6 +235,18 @@ const ja: Dictionary = {
   playbackSpeed: "再生速度",
   refresh: "更新する",
 
+  ratingGroupLabel: "動画の評価",
+  likeVideo: "高く評価",
+  unlikeVideo: "高評価を取り消す",
+  dislikeVideo: "低く評価",
+  undislikeVideo: "低評価を取り消す",
+  errRateFailed: "評価を反映できませんでした。メイン画面でログインしているか確認してください。",
+  share: "共有",
+  shareLinkLabel: "動画のリンク",
+  shareStartAt: (time) => `開始位置 ${time}`,
+  copyLink: "コピー",
+  errCopyFailed: "コピーできませんでした",
+
   queueEmptyHint: "関連動画の＋ボタンから追加できます",
 
   addNoteAtCurrentTime: "現在の再生位置にメモを追加",
@@ -367,6 +392,18 @@ const en: Dictionary = {
   mute: "Mute",
   playbackSpeed: "Speed",
   refresh: "Refresh",
+
+  ratingGroupLabel: "Rate this video",
+  likeVideo: "I like this",
+  unlikeVideo: "Remove like",
+  dislikeVideo: "I dislike this",
+  undislikeVideo: "Remove dislike",
+  errRateFailed: "Couldn't apply your rating. Check that you're logged in on the main tab.",
+  share: "Share",
+  shareLinkLabel: "Video link",
+  shareStartAt: (time) => `Start at ${time}`,
+  copyLink: "Copy",
+  errCopyFailed: "Couldn't copy",
 
   queueEmptyHint: "Add videos with the + button on a related video",
 
