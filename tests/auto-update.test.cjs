@@ -160,6 +160,22 @@ test("broken or unexpected downloads are refused and leave the installed build u
   }
 })
 
+// 展開の上限（maxOutputLength）を入れたことで、普通の中身まで弾かないことを確かめる。
+// 空ファイルは申告サイズが0になるため、上限の扱いを間違えると真っ先に壊れる。
+test("files of every size install, including empty ones, with the inflate cap in place", async (t) => {
+  const { update } = await load()
+  const target = path.join(tempDir(t), "chrome-mv3-prod")
+  const files = [
+    ["manifest.json", manifest("0.1.7")],
+    ["empty.js", ""],
+    ["tiny.js", "x"],
+    ["big.js", "y".repeat(200_000)], // よく縮むので、圧縮後より展開後がずっと大きい
+    ["stored.css", "body{}", 0]
+  ]
+  await update({ target, fetchImpl: fakeGitHub({ tag: "v0.1.7", zip: makeZip(files) }).fetchImpl })
+  assert.deepEqual(snapshot(target), Object.fromEntries(files.map(([name, content]) => [name, content])))
+})
+
 test("versions compare by number, not by text", async () => {
   const { compareVersions, parseVersion } = await load()
   assert.deepEqual(parseVersion("v0.1.7"), [0, 1, 7])

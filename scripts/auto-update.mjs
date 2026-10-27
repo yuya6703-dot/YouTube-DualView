@@ -66,7 +66,12 @@ export function unzip(buffer) {
     if (buffer.readUInt32LE(local) !== 0x04034b50) throw new Error(`zip の中身が壊れています: ${name}`)
     const start = local + 30 + buffer.readUInt16LE(local + 26) + buffer.readUInt16LE(local + 28)
     const raw = buffer.subarray(start, start + compressedSize)
-    const data = method === 0 ? raw : method === 8 ? inflateRawSync(raw) : null
+    // maxOutputLength: 目次が申告した大きさを超えては展開しない。壊れた zip や細工された zip で
+    // 際限なくメモリを使わないための上限で、超えたときは下の大きさの検査より先に失敗する。
+    // ★ Node は 1 以上しか受け付けないので、空ファイル（size=0）は 1 にする。
+    //   0 を渡すと ERR_OUT_OF_RANGE になり、空ファイルを含む Release で更新全体が止まる。
+    const cap = Math.max(size, 1)
+    const data = method === 0 ? raw : method === 8 ? inflateRawSync(raw, { maxOutputLength: cap }) : null
     if (!data) throw new Error(`対応していない圧縮形式です（${method}）: ${name}`)
     if (data.length !== size) throw new Error(`zip の中身の大きさが合いません: ${name}`)
     entries.push({ name, data })
