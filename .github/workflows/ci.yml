@@ -42,6 +42,11 @@ jobs:
       - name: Verify
         run: pnpm verify
 
+      # ★ ソースの回帰テスト（pnpm test）とは別に、ビルド済みの content script を jsdom で動かす。
+      #   「開発環境で動く」ことを「配る物が動く」ことの証拠にしないための工程（PROJECT.md §6.6）。
+      - name: Smoke test the build
+        run: pnpm smoke
+
       # ビルド成果物を確認用にアーティファクトとして残す（Chrome/Braveへの手動読み込み確認に使える）
       - name: Upload unpacked extension
         if: always()

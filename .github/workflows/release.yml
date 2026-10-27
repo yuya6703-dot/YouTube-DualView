@@ -56,6 +56,13 @@ jobs:
       - name: Package
         run: pnpm package
 
+      # ★ ビルドフォルダではなく、これから公開する zip そのものを展開して確認する。
+      #   公開物と検証物を一致させるため（PROJECT.md §6.6）。
+      - name: Smoke test the packaged zip
+        run: |
+          unzip -q build/chrome-mv3-prod.zip -d "$RUNNER_TEMP/dist"
+          node tests/dist-smoke.cjs "$RUNNER_TEMP/dist"
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
