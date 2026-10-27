@@ -203,7 +203,8 @@ async function renderActions(t, props) {
       await new Promise((resolve) => setImmediate(resolve))
     })
   }
-  return { container, draw, button, press, input: () => container.querySelector("input[type=text]") }
+  const input = (type = "text") => container.querySelector(`input[type=${type}]`)
+  return { container, draw, button, press, input }
 }
 
 test("the rating buttons mirror the main window and never flip on their own when YouTube does not apply a press", async (t) => {
@@ -239,6 +240,32 @@ test("share copies a youtu.be link, optionally starting where the video was when
   await press(button("コピー"))
   assert.equal(copiedToClipboard.at(-1), "https://youtu.be/aaaaaaaaaaa?t=83")
   assert.ok(button("コピーしました"))
+})
+
+test("pressing share copies the link there and then", async (t) => {
+  const { button, press } = await renderActions(t, {})
+  const copies = copiedToClipboard.length // この配列はテスト間で共有される
+  await press(button("共有"))
+  assert.deepEqual(copiedToClipboard.slice(copies), ["https://youtu.be/aaaaaaaaaaa"],
+    "the link is on the clipboard without a second press")
+  assert.ok(button("コピーしました"), "and the sub window says so")
+})
+
+// 共有欄を「開始位置つき」で閉じてから開き直したとき、開いた時点の再生位置でコピーすること。
+// 開始位置は開くたびに取り直すが、その値は次の描画まで state に入らないので、
+// コピーするURLを描画済みの値から組み立てると前回の位置のままになる。
+test("reopening share copies the position it was reopened at, not the one from last time", async (t) => {
+  const { button, press, input, draw } = await renderActions(t, {})
+  const copies = copiedToClipboard.length
+  await press(button("共有"))
+  await press(input("checkbox"))
+  assert.deepEqual(copiedToClipboard.slice(copies), ["https://youtu.be/aaaaaaaaaaa"],
+    "ticking the box alone does not copy again")
+  await press(button("共有")) // 閉じる
+  await draw({ currentTime: 200 })
+  await press(button("共有")) // 開き直す
+  assert.equal(input().value, "https://youtu.be/aaaaaaaaaaa?t=200")
+  assert.deepEqual(copiedToClipboard.slice(copies + 1), ["https://youtu.be/aaaaaaaaaaa?t=200"])
 })
 
 test("live streams are shared without a start position", async (t) => {

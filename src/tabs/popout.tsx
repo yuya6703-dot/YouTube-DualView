@@ -1377,21 +1377,36 @@ function VideoActions({ videoId, rating, live, currentTime, tabId, t, inlineTitl
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle")
   const shareUrl = buildShareUrl(videoId, withStart && !live ? startAt : null)
 
-  const toggleShare = () => {
-    if (!shareOpen) setStartAt(Math.floor(currentTime))
-    setCopyState("idle")
-    setShareOpen(!shareOpen)
-  }
-
-  const copyShareUrl = async () => {
+  const copyToClipboard = async (url: string) => {
     try {
-      await navigator.clipboard.writeText(shareUrl)
+      await navigator.clipboard.writeText(url)
       setCopyState("copied")
       window.setTimeout(() => setCopyState("idle"), 2000)
     } catch {
       setCopyState("failed")
     }
   }
+
+  /**
+   * 共有ボタン。押した時点でリンクをクリップボードへ入れる（欄を開いてからもう一度押させない）。
+   * 開始位置を変えたい・リンクを見たいときのために、欄と「コピー」ボタンはそのまま残す。
+   * ★ コピーするURLは、描画済みの shareUrl ではなく**ここで計算した開始位置**から組み立てる。
+   *   setStartAt は次の描画まで反映されないため、前回「開始位置つき」で閉じてから開き直すと、
+   *   shareUrl は前回の位置のままで、今の位置と違うリンクをコピーしてしまう。
+   */
+  const toggleShare = () => {
+    if (shareOpen) {
+      setShareOpen(false)
+      setCopyState("idle")
+      return
+    }
+    const start = Math.floor(currentTime)
+    setStartAt(start)
+    setShareOpen(true)
+    void copyToClipboard(buildShareUrl(videoId, withStart && !live ? start : null))
+  }
+
+  const copyShareUrl = () => copyToClipboard(shareUrl)
 
   const pillButton = "flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition disabled:opacity-40"
 
@@ -1430,6 +1445,8 @@ function VideoActions({ videoId, rating, live, currentTime, tabId, t, inlineTitl
         <button
           onClick={toggleShare}
           aria-expanded={shareOpen}
+          aria-label={t.shareAndCopy}
+          title={t.shareAndCopy}
           className={`${pillButton} rounded-full bg-neutral-800 text-neutral-300 hover:bg-neutral-700`}>
           <Share2 size={14} />
           {t.share}

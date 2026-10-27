@@ -76,6 +76,7 @@ export interface Dictionary {
   undislikeVideo: string
   errRateFailed: string
   share: string
+  shareAndCopy: string
   shareLinkLabel: string
   shareStartAt: (time: string) => string
   copyLink: string
@@ -242,6 +243,7 @@ const ja: Dictionary = {
   undislikeVideo: "低評価を取り消す",
   errRateFailed: "評価を反映できませんでした。メイン画面でログインしているか確認してください。",
   share: "共有",
+  shareAndCopy: "共有リンクをコピー",
   shareLinkLabel: "動画のリンク",
   shareStartAt: (time) => `開始位置 ${time}`,
   copyLink: "コピー",
@@ -400,6 +402,7 @@ const en: Dictionary = {
   undislikeVideo: "Remove dislike",
   errRateFailed: "Couldn't apply your rating. Check that you're logged in on the main tab.",
   share: "Share",
+  shareAndCopy: "Copy share link",
   shareLinkLabel: "Video link",
   shareStartAt: (time) => `Start at ${time}`,
   copyLink: "Copy",
