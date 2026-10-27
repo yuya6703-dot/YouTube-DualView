@@ -1,0 +1,73 @@
+name: Release
+
+# 手動実行専用。package.json の version をタグ（v0.1.7 など）にして、
+# CI と同じ検証を通した zip を添付した GitHub Release を作る。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: リリースするバージョン（package.json の version と同じ値。例 0.1.7）
+        required: true
+        type: string
+      notes:
+        description: リリースノート（Markdown）。末尾に zip の SHA-256 を自動で追記する
+        required: true
+        type: string
+
+# 同じバージョンを並走して二重に出さない
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: verify / package / publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # バージョンは package.json の "packageManager" から自動検出させる（ci.yml と同じ理由）
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.13"
+
+      # ★ inputs は run: に直接埋め込まない（スクリプト注入を避けるため、必ず env 経由で渡す）
+      - name: Check version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          actual=$(node -p "require('./package.json').version")
+          if [ "$actual" != "$VERSION" ]; then
+            echo "::error::package.json の version ($actual) が入力 ($VERSION) と一致しません"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 型検査・回帰テスト・peer依存・本番ビルド・依存監査（ci.yml と同一）
+      - name: Verify
+        run: pnpm verify
+
+      - name: Package
+        run: pnpm package
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          zip=build/chrome-mv3-prod.zip
+          sha=$(sha256sum "$zip" | cut -d' ' -f1)
+          notes=$(printf '%s' "$NOTES")
+          printf '%s\n- `chrome-mv3-prod.zip` SHA-256: `%s`\n' "$notes" "$sha" > "$RUNNER_TEMP/notes.md"
+          gh release create "v$VERSION" "$zip" \
+            --target "$GITHUB_SHA" \
+            --title "DualView for YouTube v$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md"
+          echo "chrome-mv3-prod.zip SHA-256: \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
