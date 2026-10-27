@@ -19,7 +19,9 @@ import {
   type ReplyLoadFailure,
   type StreamCommand,
   type StreamEvent,
-  type VideoKind
+  type VideoKind,
+  type VideoRating,
+  type VideoRatingAction
 } from "~lib/messaging"
 import {
   DIAGNOSE_VERSION,
@@ -58,12 +60,39 @@ function getKind(): VideoKind {
   return q(SELECTORS.player.liveBadge) ? "live" : "video"
 }
 
+/** 現在の動画の評価ボタン。SPA遷移の直後に残っている前の動画のボタンは返さない。 */
+function findRatingButton(action: VideoRatingAction): HTMLElement | null {
+  const videoId = getVideoId()
+  if (!videoId) return null
+  const button = q<HTMLElement>(action === "like" ? SELECTORS.meta.likeButton : SELECTORS.meta.dislikeButton)
+  const ownerVideoId = button?.closest("ytd-watch-flexy")?.getAttribute("video-id")
+  return ownerVideoId && ownerVideoId !== videoId ? null : button
+}
+
+function readVideoRating(): VideoRating | null {
+  const like = findRatingButton("like")
+  const dislike = findRatingButton("dislike")
+  if (!like && !dislike) return null
+  // 件数を非公開にした動画では数字の無い文言（または空）になるので、数字を含むときだけ件数とみなす
+  const likeCount = (like?.textContent ?? "").replace(/\s+/g, " ").trim()
+  return {
+    liked: readLikedState(like),
+    disliked: readLikedState(dislike),
+    ...(/\d/.test(likeCount) ? { likeCount } : {})
+  }
+}
+
+const ratingKey = (rating: VideoRating | null) =>
+  rating ? `${rating.liked}:${rating.disliked}:${rating.likeCount ?? ""}` : ""
+let lastPushedRatingKey = ""
+
 function buildStatus(): PlayerStatus {
   const v = getVideo()
   return {
     videoId: getVideoId(),
     title: text(SELECTORS.meta.title),
     channelName: text(SELECTORS.meta.channel),
+    rating: readVideoRating(),
     currentTime: v?.currentTime ?? 0,
     // ライブ配信では duration が Infinity になるため 0 に潰す
     duration: v && Number.isFinite(v.duration) ? v.duration : 0,
@@ -150,7 +179,9 @@ function makePageState(
 
 const pushStatus = () => {
   if (ports.size === 0) return
-  emit({ type: "STATUS", payload: buildStatus() })
+  const status = buildStatus()
+  lastPushedRatingKey = ratingKey(status.rating)
+  emit({ type: "STATUS", payload: status })
 }
 
 /* ============ <video> イベント購読 ============ */
@@ -255,6 +286,9 @@ setInterval(() => {
   if (ports.size === 0) return
   bindVideo()
   onNavigated()
+  // 一時停止中は STATUS が流れないため、メイン画面で評価を押した・遷移後に評価欄が遅れて出来た、
+  // といった変化をここで拾う。サブ画面の表示が実態とずれたままだと、押したボタンが逆の意味になる。
+  if (ratingKey(readVideoRating()) !== lastPushedRatingKey) pushStatus()
   // ★ 監視対象がページから切り離されていたら張り直す。
   //   YouTubeがSPA遷移でコンテナ要素ごと差し替えると、MutationObserverは
   //   detachedな古い要素を見続けて沈黙し、前の動画の情報が残り続ける。
@@ -2782,6 +2816,30 @@ registerHandlers({
     //   投稿は成功しているのに「返信を取得できませんでした」と表示されてしまう。
     await new Promise((resolve) => window.setTimeout(resolve, 500))
     return { ok: true, items: await loadRepliesFor(commentId) }
+  },
+  VIDEO_RATE: async ({ action }) => {
+    const videoId = getVideoId()
+    const button = findRatingButton(action)
+    const before = readVideoRating()
+    if (!button || !before || button.matches(":disabled, [disabled], [aria-disabled='true']")) {
+      return { rating: before, applied: false }
+    }
+    const pressed = (rating: VideoRating) => (action === "like" ? rating.liked : rating.disliked)
+    const wasPressed = pressed(before)
+    button.click()
+
+    // YouTube は押した直後に見た目を切り替える。未ログインだとログイン案内を出すだけで切り替わらないので、
+    // 一定時間待っても変わらなければ「反映されなかった」として返す。
+    let applied = false
+    for (let attempt = 0; attempt < 8 && !applied; attempt++) {
+      await new Promise((resolve) => window.setTimeout(resolve, 125))
+      if (getVideoId() !== videoId) break
+      const now = readVideoRating()
+      applied = now !== null && pressed(now) !== wasPressed
+    }
+    // 一時停止中は STATUS が流れないため、ここで送ってサブ画面の表示を実態へ合わせる
+    pushStatus()
+    return { rating: readVideoRating(), applied }
   },
   DIAGNOSE_SELECTORS: () => ({ v: DIAGNOSE_VERSION, checks: diagnoseDetail(), samples: sampleOutlines() })
 })

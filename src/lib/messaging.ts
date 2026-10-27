@@ -100,10 +100,21 @@ export interface FeedItem {
 
 export type VideoKind = "video" | "live" | "archive" | "unknown"
 
+/** メイン画面の動画に対する自分の評価。DOM（評価ボタンの aria-pressed）が正。 */
+export interface VideoRating {
+  liked: boolean
+  disliked: boolean
+  // 高評価の件数。YouTube の表示文言のまま（"1.2万" / "12K"）。件数を非公開にしている動画では省略
+  likeCount?: string
+}
+
+export type VideoRatingAction = "like" | "dislike"
+
 export interface PlayerStatus {
   videoId: string | null
   title: string
   channelName: string
+  rating: VideoRating | null // 評価ボタンが見つからなければ null（サブ画面は評価ボタンを出さない）
   currentTime: number
   duration: number
   volume: number       // 0-100（HTMLVideoElement の 0-1 から変換済み）
@@ -163,6 +174,9 @@ export type Contract = {
   // 返信の投稿。返信は自動監視の対象外（COMMENT_LOAD_REPLIESと同じくオンデマンド取得）
   // なので、投稿後の最新の返信一覧をこちらから返してPopout側の状態を更新させる。
   COMMENT_REPLY: { req: { commentId: string; text: string }; res: { ok: boolean; items: FeedItem[] } }
+  // 動画の高評価/低評価をトグルする。COMMENT_TOGGLE_LIKE と同じくメイン画面のボタンを押して読み戻す。
+  // applied: false は押しても状態が変わらなかった（未ログインでログイン案内が出た等）。
+  VIDEO_RATE: { req: { action: VideoRatingAction }; res: { rating: VideoRating | null; applied: boolean } }
   DIAGNOSE_SELECTORS: { req: void;                    res: DiagnoseReport }
 
   /* --- 受け手: Service Worker --- */

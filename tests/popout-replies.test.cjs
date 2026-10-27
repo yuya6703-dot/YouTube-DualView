@@ -56,7 +56,7 @@ function load(relative, extra = "") {
 }
 const { DEFAULT_SETTINGS } = load("src/lib/messaging.ts")
 const { getDictionary } = load("src/lib/i18n.ts")
-const { testing } = load("src/tabs/popout.tsx", "\nexport const testing = { CommentRow, RelatedRow, PagingTail }\n")
+const { testing } = load("src/tabs/popout.tsx", "\nexport const testing = { CommentRow, RelatedRow, PagingTail, VideoActions }\n")
 
 const comment = (id, replyCount) => ({
   id, author: `Author ${id}`, avatarUrl: "", text: `Comment ${id}`,
@@ -177,4 +177,73 @@ test("an empty comment list shows YouTube's own reason when there is one", async
   assert.equal(await renderTail(t, done, 0), "取得できるコメントはありません")
   assert.equal(await renderTail(t, { ...done, loaded: 3, message: "コメントはオフになっています。" }, 3),
     "コメントを最後まで読み込みました（3件）", "a reason never replaces the count once comments exist")
+})
+
+const copiedToClipboard = []
+Object.defineProperty(navigator, "clipboard", {
+  value: { writeText: async (value) => { copiedToClipboard.push(value) } }, configurable: true
+})
+
+async function renderActions(t, props) {
+  const container = document.body.appendChild(document.createElement("div"))
+  const root = createRoot(container)
+  t.after(async () => { await act(async () => root.unmount()); container.remove() })
+  const draw = (overrides = {}) => act(async () => {
+    root.render(React.createElement(testing.VideoActions, {
+      videoId: "aaaaaaaaaaa", rating: null, live: false, currentTime: 83.6, tabId: 7, t: getDictionary("ja"),
+      ...props, ...overrides
+    }))
+  })
+  await draw()
+  const button = (label) => [...container.querySelectorAll("button")]
+    .find((b) => b.getAttribute("aria-label") === label || b.textContent.trim() === label)
+  const press = async (element) => {
+    await act(async () => {
+      element.click()
+      await new Promise((resolve) => setImmediate(resolve))
+    })
+  }
+  return { container, draw, button, press, input: () => container.querySelector("input[type=text]") }
+}
+
+test("the rating buttons mirror the main window and never flip on their own when YouTube does not apply a press", async (t) => {
+  const { container, button, press } = await renderActions(t, { rating: { liked: true, disliked: false, likeCount: "1.2万" } })
+  assert.equal(button("高評価を取り消す")?.getAttribute("aria-pressed"), "true")
+  assert.equal(button("高評価を取り消す").textContent.trim(), "1.2万")
+  assert.equal(button("低く評価")?.getAttribute("aria-pressed"), "false")
+
+  respond = () => ({ ok: true, data: { rating: { liked: true, disliked: false, likeCount: "1.2万" }, applied: false } })
+  await press(button("低く評価"))
+  assert.deepEqual(sent.at(-1), { tabId: 7, action: "VIDEO_RATE", payload: { action: "dislike" } })
+  assert.match(container.textContent, /評価を反映できませんでした/)
+  assert.equal(button("低く評価")?.getAttribute("aria-pressed"), "false", "no optimistic toggle")
+})
+
+test("without rating buttons on the main window only sharing is offered", async (t) => {
+  const { container, button } = await renderActions(t, { rating: null })
+  assert.equal(container.querySelector("[role=group]"), null)
+  assert.ok(button("共有"))
+})
+
+test("share copies a youtu.be link, optionally starting where the video was when share was opened", async (t) => {
+  const { container, draw, button, press, input } = await renderActions(t, {})
+  await press(button("共有"))
+  assert.equal(input().value, "https://youtu.be/aaaaaaaaaaa")
+  assert.match(container.textContent, /開始位置 1:23/)
+
+  await draw({ currentTime: 200 }) // 再生が進んでも、開いた時点の位置のまま
+  assert.match(container.textContent, /開始位置 1:23/)
+  await press(container.querySelector("input[type=checkbox]"))
+  assert.equal(input().value, "https://youtu.be/aaaaaaaaaaa?t=83")
+
+  await press(button("コピー"))
+  assert.equal(copiedToClipboard.at(-1), "https://youtu.be/aaaaaaaaaaa?t=83")
+  assert.ok(button("コピーしました"))
+})
+
+test("live streams are shared without a start position", async (t) => {
+  const { container, button, press, input } = await renderActions(t, { live: true })
+  await press(button("共有"))
+  assert.equal(container.querySelector("input[type=checkbox]"), null)
+  assert.equal(input().value, "https://youtu.be/aaaaaaaaaaa")
 })

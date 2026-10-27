@@ -85,7 +85,8 @@ function setup(t, html, video = "current") {
       bound: () => commentContainerEl,
       items: () => Array.from(commentItemCache.values()),
       loadMoreComments, commentsReachedEnd, commentsAreDefinitelyEmpty,
-      findTopLevelCommentContinuation, stopWatchPageObservers, fetchRelated, nudgeIntoViewport
+      findTopLevelCommentContinuation, stopWatchPageObservers, fetchRelated, nudgeIntoViewport,
+      readVideoRating
     }
   `)
   const port = { postMessage: (event) => events.push(event) }
@@ -670,4 +671,87 @@ test("the hidden comments panel is not mistaken for the real section while the p
   // この時点で通常欄は [hidden]。パネルを掴んで、その continuation を刺激してはならない
   assert.equal(h.doc.querySelector("#panel-continuation").style.position, "",
     "the hidden panel's continuation is never placed in the viewport")
+})
+
+// 動画の評価ボタン（segmented-like-dislike-button-view-model 世代）。押下状態は aria-pressed、件数はボタン内の文言。
+const ratingButtons = ({ liked = false, disliked = false, count = "1.2万" } = {}) => `
+  <ytd-watch-metadata><div id="top-level-buttons-computed"><segmented-like-dislike-button-view-model>
+    <like-button-view-model><toggle-button-view-model><button-view-model>
+      <button aria-pressed="${liked}"><div class="yt-spec-button-shape-next__icon"></div>
+        <div class="yt-spec-button-shape-next__button-text-content">${count}</div></button>
+    </button-view-model></toggle-button-view-model></like-button-view-model>
+    <dislike-button-view-model><toggle-button-view-model><button-view-model>
+      <button aria-pressed="${disliked}"></button>
+    </button-view-model></toggle-button-view-model></dislike-button-view-model>
+  </segmented-like-dislike-button-view-model></div></ytd-watch-metadata>`
+// CS が jsdom 側の realm で作ったオブジェクトは、プロトタイプが違うため deepStrictEqual で一致しない
+const plain = (value) => JSON.parse(JSON.stringify(value))
+const ratingButton = (h, kind) => h.doc.querySelector(`ytd-watch-metadata ${kind}-button-view-model button`)
+// YouTube の契約: ログイン中なら押した少し後に切り替わり、高評価と低評価は排他。未ログインなら何も変わらない。
+const youtubeRatesOnClick = (h) => {
+  const [like, dislike] = [ratingButton(h, "like"), ratingButton(h, "dislike")]
+  const toggle = (button, other) => button.addEventListener("click", () => h.win.setTimeout(() => {
+    const on = button.getAttribute("aria-pressed") !== "true"
+    button.setAttribute("aria-pressed", String(on))
+    if (on) other.setAttribute("aria-pressed", "false")
+  }, 50))
+  toggle(like, dislike)
+  toggle(dislike, like)
+}
+
+test("the video rating is read from the watch metadata, not the player's own buttons", (t) => {
+  const h = setup(t, ratingButtons({ liked: true }))
+  // 新しい全画面UIのプレイヤー内ボタンを模した偽物。文書順ではこちらが先
+  h.doc.querySelector("#movie_player").innerHTML =
+    '<like-button-view-model><button aria-pressed="false">999</button></like-button-view-model>'
+  assert.deepEqual(plain(h.api.readVideoRating()), { liked: true, disliked: false, likeCount: "1.2万" })
+
+  // 件数を非公開にした動画は数字の無い文言になる。件数として扱わない
+  h.doc.querySelector(".yt-spec-button-shape-next__button-text-content").textContent = "高く評価"
+  assert.deepEqual(plain(h.api.readVideoRating()), { liked: true, disliked: false })
+
+  // SPA遷移直後に残っている前の動画のボタンは、今の動画の評価として扱わない
+  h.doc.querySelector("ytd-watch-flexy").setAttribute("video-id", "previous")
+  assert.equal(h.api.readVideoRating(), null)
+})
+
+test("rating from the sub window clicks the main window's button and reports whether YouTube applied it", async (t) => {
+  const h = setup(t, ratingButtons())
+  youtubeRatesOnClick(h)
+  h.start()
+  const rate = async (action) => {
+    const pending = h.handlers.VIDEO_RATE({ action })
+    await h.advance(1200)
+    return pending
+  }
+
+  assert.deepEqual(plain(await rate("like")), { rating: { liked: true, disliked: false, likeCount: "1.2万" }, applied: true })
+  const status = h.events.filter((e) => e.type === "STATUS").at(-1)
+  assert.equal(status.payload.rating.liked, true, "the new state is pushed even while the video is paused")
+
+  assert.deepEqual(plain((await rate("dislike")).rating), { liked: false, disliked: true, likeCount: "1.2万" })
+  assert.deepEqual(plain((await rate("dislike")).rating), { liked: false, disliked: false, likeCount: "1.2万" }, "a second press removes it")
+})
+
+test("a rating YouTube does not apply (logged out) is reported as not applied", async (t) => {
+  const h = setup(t, ratingButtons())
+  let clicks = 0
+  ratingButton(h, "like").addEventListener("click", () => clicks++) // ログイン案内を出すだけで状態は変えない
+  const pending = h.handlers.VIDEO_RATE({ action: "like" })
+  await h.advance(1200)
+  assert.deepEqual(plain(await pending), { rating: { liked: false, disliked: false, likeCount: "1.2万" }, applied: false })
+  assert.equal(clicks, 1, "the button is pressed exactly once")
+})
+
+test("a rating changed on the main window while paused reaches the sub window within a second", async (t) => {
+  const h = setup(t, ratingButtons())
+  h.start()
+  const ratings = () => h.events.filter((e) => e.type === "STATUS").map((e) => e.payload.rating.liked)
+  await h.advance(1000)
+  assert.deepEqual(ratings(), [false])
+  ratingButton(h, "like").setAttribute("aria-pressed", "true")
+  await h.advance(1000)
+  assert.deepEqual(ratings(), [false, true])
+  await h.advance(3000)
+  assert.deepEqual(ratings(), [false, true], "nothing more is sent while the rating stays the same")
 })
