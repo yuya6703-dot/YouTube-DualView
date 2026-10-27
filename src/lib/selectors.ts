@@ -24,7 +24,10 @@ export const SELECTORS = {
     // 動画の高評価/低評価。押下状態は aria-pressed、件数はボタン内の表示文言。
     // ★ ytd-watch-metadata に絞る。新しい全画面UIはプレイヤー内にも評価ボタンを持つことがあり、
     //   絞らないと文書順でそちらが先に一致し得る（findVideoAnchor の still と同じ罠）。
-    //   ※ 実機での確認前。壊れていたらセレクタ診断の meta.likeButton / meta.dislikeButton に出る。
+    //   2026-10-28 実DOMで確認: 絞らない `like-button-view-model button` の先頭一致は実際に
+    //   プレイヤー内のボタンだった（文書順は player → metadata）。metadata 側のボタンは
+    //   aria-pressed を持ち、高評価はボタン内に件数（例「362」）、低評価は数字を持たない。
+    //   壊れていたらセレクタ診断の meta.likeButton / meta.dislikeButton に出る。
     likeButton: [
       "ytd-watch-metadata like-button-view-model button",
       "ytd-watch-metadata #segmented-like-button button",
