@@ -38,6 +38,15 @@ APIキーをDeepLへ直接送信します。自動送信・一括送信は行い
 
 Chrome Web Store での配布は準備済みですが、現時点では未公開です。
 
+## 自動更新（Windows・手元のフォルダから読み込んでいる場合）
+
+リポジトリの `build\chrome-mv3-prod` を読み込んでいるなら、`update.cmd` を1度実行すれば、以後は自動で更新されます。
+
+- GitHub の最新の Release の `chrome-mv3-prod.zip` を `build\chrome-mv3-prod` に入れる（SHA-256 を照合。同じか新しい版が入っていれば何もしない）。読み込むフォルダは変わらないので、拡張機能の ID と設定はそのまま
+- Windows のスタートアップに登録され、サインインのたびに確認する。ブラウザを開き直すと新しい版に切り替わる
+- 記録は `%LOCALAPPDATA%\DualView\auto-update.log`。やめるときは、スタートアップ（`shell:startup`）の `DualView auto-update.cmd` を消す
+- 配信は、GitHub Actions の Release ワークフロー（`.github/workflows/release.yml`）で Release を作ったときに行われる
+
 ## セットアップ（開発）
 
 ```bash
