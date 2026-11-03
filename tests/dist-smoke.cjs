@@ -12,6 +12,11 @@
  *   B 通常のページ                  … 従来どおりコメントがサブ画面へ流れる
  *   C 前の動画のDOMが残っている     … 従来どおりパネル経由で読み込みを起動する（2026-09-17の契約）
  *   D 動画の評価（v75）             … プレイヤー内のボタンではなく ytd-watch-metadata 側から読む
+ *   E サブ画面（v78）               … ビルド済みの popout を起動し、開いた時点の表示と共有の挙動を見る
+ *
+ * ★ E を入れるまで、配布物の確認は content script だけだった。サブ画面側の変更
+ *   （v76 の共有、v78 の分割・共有）は毎回その場限りのスクリプトで確かめており、
+ *   リリース工程では守られていなかった。
  */
 const assert = require("node:assert/strict")
 const fs = require("node:fs")
@@ -165,12 +170,123 @@ async function videoRating() {
   h.win.close()
 }
 
+/**
+ * E: ビルド済みのサブ画面を起動する。メイン画面から STATUS を1つ渡し、
+ *    「開いた時点でどう見えるか」と「共有を押すと何が起きるか」を確認する。
+ */
+async function subWindow() {
+  const popoutHtml = fs.readFileSync(path.join(buildDir, "tabs", "popout.html"), "utf8")
+  const popoutFile = /<script src="\/(tabs\/popout\.[^"]+\.js)"/.exec(popoutHtml)[1]
+  const copied = []
+  const resetTimers = new Map()
+  let toSubWindow = null
+  const noop = () => {}
+  const dom = new JSDOM(popoutHtml.replace(/<script[^>]*><\/script>/, ""), {
+    url: "chrome-extension://smoke/tabs/popout.html", runScripts: "outside-only", pretendToBeVisual: true,
+    beforeParse(window) {
+      window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} }
+      // 「コピーしました」を消す2秒のタイマーだけを捕まえる。実タイマーはそのまま動かし、
+      // clearTimeout も尊重するので、連続コピーの扱いを時間に依存せず確かめられる
+      const realSet = window.setTimeout
+      const realClear = window.clearTimeout
+      window.setTimeout = (fn, ms, ...rest) => {
+        const id = realSet(fn, ms, ...rest)
+        if (ms === 2000) resetTimers.set(id, fn)
+        return id
+      }
+      window.clearTimeout = (id) => { resetTimers.delete(id); return realClear(id) }
+      Object.defineProperty(window.navigator, "clipboard", {
+        value: { writeText: async (text) => { copied.push(text) } }, configurable: true
+      })
+      window.chrome = {
+        runtime: {
+          id: "smoke", lastError: undefined,
+          onMessage: { addListener: noop, removeListener: noop },
+          sendMessage: async (env) =>
+            env.action === "GET_TARGET_TAB" ? { ok: true, data: { tabId: 7 } } : { ok: true, data: {} },
+          getURL: (p) => `chrome-extension://smoke/${p}`
+        },
+        storage: {
+          local: { get: async () => ({}), set: async () => {} },
+          sync: { get: async () => ({}), set: async () => {} },
+          onChanged: { addListener: noop, removeListener: noop }
+        },
+        tabs: {
+          connect: () => ({
+            name: "yt-dualview:player",
+            onMessage: { addListener: (fn) => { toSubWindow = fn }, removeListener: noop },
+            onDisconnect: { addListener: noop, removeListener: noop },
+            postMessage: noop, disconnect: noop
+          }),
+          sendMessage: async () => ({ ok: true, data: {} }),
+          create: async () => ({})
+        }
+      }
+    }
+  })
+  const win = dom.window
+  new vm.Script(fs.readFileSync(path.join(buildDir, popoutFile), "utf8"), { filename: popoutFile })
+    .runInContext(dom.getInternalVMContext())
+  const doc = win.document
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+  const button = (label) => [...doc.querySelectorAll("button")]
+    .find((b) => b.getAttribute("aria-label") === label || b.textContent.trim() === label)
+
+  for (let i = 0; i < 50 && !toSubWindow; i++) await wait(100)
+  assert.ok(toSubWindow, "E: サブ画面がメイン画面のPortへ繋ぐ")
+  toSubWindow({ type: "STATUS", payload: {
+    videoId: "aaaaaaaaaaa", title: "Video", channelName: "Channel", rating: null,
+    currentTime: 83, duration: 300, volume: 50, muted: false, playbackRate: 1,
+    paused: true, ended: false, kind: "video", sampledAt: Date.now()
+  } })
+  await wait(500)
+
+  // 開いた時点で関連動画とコメントが半々（v78）
+  const panes = [...doc.querySelectorAll("section")]
+  const sized = panes.filter((p) => /flex-basis/.test(p.getAttribute("style") ?? ""))
+  assert.equal(panes.length, 2, "E: 開いた時点で関連動画とコメントが並ぶ")
+  assert.equal(sized.length, 1, "E: 関連動画側が比率を持つ")
+  assert.match(sized[0].getAttribute("style"), /flex-basis: 50%/, "E: 既定は半々")
+
+  // 共有は押したらコピー。URLの欄は出さない（v78）
+  const share = button("共有リンクをコピー")
+  assert.ok(share, "E: 共有ボタンがある")
+  share.dispatchEvent(new win.MouseEvent("click", { bubbles: true }))
+  await wait(300)
+  assert.deepEqual(copied, ["https://youtu.be/aaaaaaaaaaa"], "E: 押した時点でコピーされる")
+  assert.ok(doc.body.textContent.includes("コピーしました"), "E: コピーしたことが分かる")
+  assert.ok(![...doc.querySelectorAll("input")].some((i) => (i.value ?? "").startsWith("https://youtu.be/")),
+    "E: URL を読ませる欄は出さない")
+
+  // 開始位置つきは隣のボタン。押した時点の再生位置で作る
+  const fromHere = button("この位置から共有（1:23）")
+  assert.ok(fromHere, "E: 現在位置のボタンが隣にある")
+  fromHere.dispatchEvent(new win.MouseEvent("click", { bubbles: true }))
+  await wait(300)
+  assert.deepEqual(copied.slice(1), ["https://youtu.be/aaaaaaaaaaa?t=83"], "E: その位置からのリンクになる")
+
+  // 2秒以内にもう一度コピーしたとき、前回のタイマーが今回の表示を消さないこと
+  const [firstTimer] = [...resetTimers.keys()]
+  assert.ok(firstTimer !== undefined, "E: コピーするとリセットのタイマーが張られる")
+  share.dispatchEvent(new win.MouseEvent("click", { bubbles: true }))
+  await wait(200)
+  if (resetTimers.has(firstTimer)) resetTimers.get(firstTimer)()
+  await wait(100)
+  assert.ok(doc.body.textContent.includes("コピーしました"),
+    "E: 連続でコピーしても、前回のタイマーに表示を消されない")
+
+  console.log("E サブ画面               →", JSON.stringify(panes.map((p) => p.querySelector("p")?.textContent.trim())),
+    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持")
+  win.close()
+}
+
 ;(async () => {
   console.log(`配布物: v${manifest.version} / ${csFile}`)
   await stagedHydration()
   await normalPage()
   await stalePreviousVideo()
   await videoRating()
+  await subWindow()
   console.log("DIST SMOKE OK")
   process.exit(0)
 })().catch((error) => {

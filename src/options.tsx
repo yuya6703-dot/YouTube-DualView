@@ -5,7 +5,7 @@
  * Plasmoの規約でこのファイルを置くだけで manifest の options_page に自動登録される
  * （src/popup.tsx を置くと default_popup が自動登録されるのと同じ仕組み。D-03参照）。
  */
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { DEEPL_TARGET_LANGS } from "~lib/deepl"
 import { FEATURES } from "~lib/features"
 import { getDictionary } from "~lib/i18n"
@@ -31,6 +31,7 @@ export default function Options() {
   )
   const [loaded, setLoaded] = useState(false)
   const [saved, setSaved] = useState(false)
+  const savedResetTimer = useRef<number | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -91,7 +92,14 @@ export default function Options() {
 
   const flashSaved = () => {
     setSaved(true)
-    window.setTimeout(() => setSaved(false), 1500)
+    // ★ 前回のタイマーを取り消してから張り直す。残したままだと、表示が消えるまでの間に
+    //   もう一度実行したとき、前回のタイマーが今回の表示を途中で消す
+    //   （例: 設定を1.4秒間隔で2つ変えると0.1秒で消える）。usePlayerPort の再接続と同じ扱い。
+    if (savedResetTimer.current !== null) window.clearTimeout(savedResetTimer.current)
+    savedResetTimer.current = window.setTimeout(() => {
+      savedResetTimer.current = null
+      setSaved(false)
+    }, 1500)
   }
 
   const resetToDefaults = () => {

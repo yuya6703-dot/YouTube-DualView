@@ -252,6 +252,37 @@ test("the position button shares from wherever the video is now", async (t) => {
     "it follows the playhead instead of a position captured earlier")
 })
 
+// 「コピーしました」は2秒で消える。2秒以内にもう一度コピーすると、前回のタイマーが残っていれば
+// 今回の表示を途中で消してしまう（1.9秒後に押すと0.1秒で消える）。押すたびに2秒を取り直すこと。
+// 共有は2つのボタンがあり連続で押せるので、この経路は普通に踏む。
+test("copying again restarts the two seconds instead of being cut short by the last one", async (t) => {
+  // 2秒のリセットタイマーだけを捕まえる。実タイマーはそのまま動かし、clearTimeout も尊重する
+  const pending = new Map()
+  const realSet = window.setTimeout
+  const realClear = window.clearTimeout
+  window.setTimeout = (fn, ms, ...rest) => {
+    const id = realSet(fn, ms, ...rest)
+    if (ms === 2000) pending.set(id, fn)
+    return id
+  }
+  window.clearTimeout = (id) => { pending.delete(id); return realClear(id) }
+  t.after(() => { window.setTimeout = realSet; window.clearTimeout = realClear })
+
+  const { button, press } = await renderActions(t, {})
+  // コピー後はボタンの文字が「コピーしました」に変わるので、変わらない aria-label で押す
+  const shareButton = () => button("共有リンクをコピー")
+  await press(shareButton())
+  const [firstId] = [...pending.keys()]
+  assert.ok(firstId !== undefined, "the first copy schedules the reset")
+
+  await press(shareButton()) // 1回目の2秒が切れる前にもう一度
+  assert.ok(button("コピーしました"))
+
+  // 1回目のタイマーが切れる瞬間。取り消されていれば何も起きない
+  if (pending.has(firstId)) await act(async () => { pending.get(firstId)() })
+  assert.ok(button("コピーしました"), "the second copy keeps its confirmation")
+})
+
 test("live streams offer no position to share from", async (t) => {
   const { button, press } = await renderActions(t, { live: true })
   const copies = copiedToClipboard.length

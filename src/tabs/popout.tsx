@@ -239,6 +239,7 @@ export default function Popout() {
   const [diagError, setDiagError] = useState<string | null>(null)
   const [diagBusy, setDiagBusy] = useState(false)
   const [copied, setCopied] = useState(false)
+  const copiedResetTimer = useRef<number | null>(null)
   const [playerOpen, setPlayerOpen] = useState(false) // 初期は閉じる（サブ画面は一覧を見るのが主目的）
   const [relatedOpen, setRelatedOpen] = useState(true)
   const [commentsOpen, setCommentsOpen] = useState(true)
@@ -618,7 +619,14 @@ export default function Popout() {
     if (!diag) return
     await navigator.clipboard.writeText(JSON.stringify(diag, null, 1))
     setCopied(true)
-    window.setTimeout(() => setCopied(false), 2000)
+    // ★ 前回のタイマーを取り消してから張り直す。残したままだと、表示が消えるまでの間に
+    //   もう一度実行したとき、前回のタイマーが今回の表示を途中で消す
+    //   （例: 1.9秒後にもう一度押すと0.1秒で消える）。usePlayerPort の再接続と同じ扱い。
+    if (copiedResetTimer.current !== null) window.clearTimeout(copiedResetTimer.current)
+    copiedResetTimer.current = window.setTimeout(() => {
+      copiedResetTimer.current = null
+      setCopied(false)
+    }, 2000)
   }
 
   const diagOk = diag ? Object.values(diag.checks).filter((v) => v.ok).length : 0
@@ -1373,12 +1381,20 @@ function VideoActions({ videoId, rating, live, currentTime, tabId, t, inlineTitl
   }
 
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle")
+  const copyResetTimer = useRef<number | null>(null)
 
   const copyToClipboard = async (url: string) => {
     try {
       await navigator.clipboard.writeText(url)
       setCopyState("copied")
-      window.setTimeout(() => setCopyState("idle"), 2000)
+      // ★ 前回のタイマーを取り消してから張り直す。残したままだと、表示が消えるまでの間に
+      //   もう一度実行したとき、前回のタイマーが今回の表示を途中で消す
+      //   （例: 1.9秒後にもう一度押すと0.1秒で消える）。usePlayerPort の再接続と同じ扱い。
+      if (copyResetTimer.current !== null) window.clearTimeout(copyResetTimer.current)
+      copyResetTimer.current = window.setTimeout(() => {
+        copyResetTimer.current = null
+        setCopyState("idle")
+      }, 2000)
     } catch {
       setCopyState("failed")
     }
