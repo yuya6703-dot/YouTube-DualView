@@ -1695,9 +1695,23 @@ let commentLoading = false
 /**
  * 対象要素を一時的にビューポート内へ移し、YouTubeのIntersectionObserverを起動する。
  *
- * ページのscrollTopは変更しない。以前の opacity:0 / z-index:-1 / 120ms は、
- * 可視性判定やバックグラウンドタイマーで不発になり得たため、24pxの実交差領域を
- * 十分な時間だけ作る。変更したCSSプロパティだけを復元し、YouTube側の同時更新を壊さない。
+ * ページのscrollTopは変更しない。24pxの実交差領域を十分な時間だけ作り、
+ * 変更したCSSプロパティだけを復元して、YouTube側の同時更新を壊さない。
+ *
+ * ★ 箱は `opacity: 0` で**見えない**ようにする。全画面視聴中、YouTube は動画単体ではなく
+ *   アプリ全体を全画面にするため、コメント欄も「全画面の内側」に残り、この fixed の箱は
+ *   映像の上に描かれてしまう（アイコン補完は最大12個が右上に縦に並ぶ。2026-11-03 ユーザー報告
+ *   「コメントの読み込みしてる時にみんなのアイコンがメインの右上に表示される」「邪魔くさい」）。
+ *   IntersectionObserver は opacity も visibility も見ない。交差は幾何だけで決まり、
+ *   効くのは display:none と祖先の overflow による切り取りなので、透明でも読み込みは起きる。
+ *   2026-11-03 実ページ（コメント40件・未読み込みアイコン15件）で実測:
+ *     - アイコン: opacity:0 でも src が入る。opacity:1 の対照と同じ。**触らなかった2件は
+ *       未読み込みのまま**＝読み込ませているのは nudge であって、時間経過ではない
+ *     - コメント欄の起動: 読み込み後5秒で0件のままのページに opacity:0 で700ms nudge →
+ *       スレッド6件＋続き読み込み開始。v74 の経路も透明で成立する
+ *   ここには以前「opacity:0 / z-index:-1 / 120ms は可視性判定やバックグラウンドタイマーで
+ *   不発になり得た」とあったが、これは実測ではなく、滞在時間40ms・サイズ1pxと同時に
+ *   変更した際の推測だった。実際に効いていたのは滞在時間と大きさの方。
  */
 const activeNudges = new WeakMap<HTMLElement, Array<() => void>>()
 const CONTINUATION_HOST_SELECTOR = "ytd-continuation-item-renderer, yt-continuation-item-renderer"
@@ -1952,7 +1966,7 @@ function placeInViewport(el: HTMLElement, targetSnapshot: StyleSnapshot, top: nu
   const forced: Record<(typeof TARGET_NUDGE_PROPERTIES)[number], string> = {
     position: "fixed", top: `${top}px`, right: "1px", bottom: "auto", left: "auto",
     width: "24px", height: "24px", "min-width": "24px", "min-height": "24px",
-    display: "block", visibility: "visible", opacity: "1", "z-index": "2147483647",
+    display: "block", visibility: "visible", opacity: "0", "z-index": "2147483647",
     "pointer-events": "none", "content-visibility": "visible", contain: "none",
     overflow: "hidden", transform: "none"
   }

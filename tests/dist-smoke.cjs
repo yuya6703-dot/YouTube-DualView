@@ -113,8 +113,11 @@ async function stagedHydration() {
   </div></ytd-item-section-renderer>`
   // YouTube の契約: この continuation が画面内に入ったときだけ最初のバッチを入れる
   const continuation = inline.querySelector("ytd-continuation-item-renderer")
+  // 画面内へ置かれた瞬間の見た目を捕まえる。ここが透明でないと、全画面の映像の上に箱が描かれる
+  let tileOpacity = null
   const observer = new h.win.MutationObserver(() => {
     if (continuation.style.position !== "fixed") return
+    tileOpacity = continuation.style.getPropertyValue("opacity")
     observer.disconnect()
     continuation.querySelector("#ghost-comment-section").remove()
     inline.querySelector("#contents").insertAdjacentHTML("afterbegin", thread("c1") + thread("c2"))
@@ -123,7 +126,8 @@ async function stagedHydration() {
 
   await waitFor(() => feedIds(h.events).length >= 2)
   assert.deepEqual(feedIds(h.events), ["lc:c1", "lc:c2"], "A: メイン画面に触れずに最初のバッチがサブ画面へ届く")
-  console.log("A 段階的ハイドレーション → パネル不介入・FEED_APPEND", JSON.stringify(feedIds(h.events)))
+  assert.equal(tileOpacity, "0", "A: 画面内へ置く箱は透明（映像の上に描かれない）")
+  console.log("A 段階的ハイドレーション → パネル不介入・FEED_APPEND", JSON.stringify(feedIds(h.events)), "/ 箱の opacity:", tileOpacity)
   h.win.close()
 }
 

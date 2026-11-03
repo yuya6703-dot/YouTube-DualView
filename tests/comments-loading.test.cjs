@@ -410,6 +410,31 @@ test("empty avatars are nudged in one batch with separate tiles, then restored",
   assert.equal(hosts.filter((el) => el.style.position === "fixed").length, 0, "styles are restored after the dwell")
 })
 
+// nudge の箱はメイン画面の右上に 24px で現れる。全画面視聴中は YouTube がアプリ全体を全画面に
+// するため、この fixed の箱は映像の上に描かれてしまう（アイコン補完は最大12個が縦に並ぶ。
+// ユーザー報告「コメントの読み込みしてる時にみんなのアイコンがメインの右上に表示される」「邪魔くさい」）。
+// IntersectionObserver は opacity を見ない（交差は幾何だけで決まる）ので、透明でも読み込みは起きる。
+test("the tiles placed in the viewport are transparent, so nothing paints over the video", async (t) => {
+  const ids = ["a", "b"]
+  const many = ids.map((id) => thread(id).replace('<img src="https://yt3.ggpht.com/avatar.jpg">', "<img>")).join("")
+  const h = setup(t, section(many))
+  h.start()
+  await h.advance(600)
+  const tiles = [...h.doc.querySelectorAll("#author-thumbnail")].filter((el) => el.style.position === "fixed")
+  assert.equal(tiles.length, ids.length, "the avatars are placed in the viewport")
+  for (const el of tiles) {
+    assert.equal(el.style.getPropertyValue("opacity"), "0", "the avatar tile paints nothing")
+    assert.equal(el.style.getPropertyPriority("opacity"), "important", "YouTube's own styles cannot make it visible again")
+  }
+  await h.advance(400) // アイコンの滞在が終わるのを待ってから、単体 nudge を同じ観点で見る
+  // コメント欄そのものを起動する nudge も同じ箱を使う。こちらが見えると中身が映像を覆う
+  const comments = h.doc.querySelector("ytd-comments#comments")
+  h.api.nudgeIntoViewport(comments, () => {}, 300)
+  assert.equal(comments.style.getPropertyValue("opacity"), "0", "the comment section's box paints nothing either")
+  await h.advance(1000)
+  assert.equal(comments.getAttribute("style") ?? "", "", "and the box leaves no inline style behind")
+})
+
 // 全画面では YouTube が #columns（コメント欄・関連動画欄の親。プレイヤーは #full-bleed-container 側）を
 // display:none にする。nudge はこの祖先を描画に戻す必要があるが、場所を取る形で戻すと文書が
 // スクロール可能になり、YouTube 側のレイアウト再計算（プレイヤーの寸法計算）を誘発する。
