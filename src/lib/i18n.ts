@@ -77,9 +77,7 @@ export interface Dictionary {
   errRateFailed: string
   share: string
   shareAndCopy: string
-  shareLinkLabel: string
   shareStartAt: (time: string) => string
-  copyLink: string
   errCopyFailed: string
 
   // 次に再生
@@ -244,9 +242,7 @@ const ja: Dictionary = {
   errRateFailed: "評価を反映できませんでした。メイン画面でログインしているか確認してください。",
   share: "共有",
   shareAndCopy: "共有リンクをコピー",
-  shareLinkLabel: "動画のリンク",
-  shareStartAt: (time) => `開始位置 ${time}`,
-  copyLink: "コピー",
+  shareStartAt: (time) => `この位置から共有（${time}）`,
   errCopyFailed: "コピーできませんでした",
 
   queueEmptyHint: "関連動画の＋ボタンから追加できます",
@@ -403,9 +399,7 @@ const en: Dictionary = {
   errRateFailed: "Couldn't apply your rating. Check that you're logged in on the main tab.",
   share: "Share",
   shareAndCopy: "Copy share link",
-  shareLinkLabel: "Video link",
-  shareStartAt: (time) => `Start at ${time}`,
-  copyLink: "Copy",
+  shareStartAt: (time) => `Share from ${time}`,
   errCopyFailed: "Couldn't copy",
 
   queueEmptyHint: "Add videos with the + button on a related video",

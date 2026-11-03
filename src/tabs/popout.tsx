@@ -243,7 +243,9 @@ export default function Popout() {
   const [relatedOpen, setRelatedOpen] = useState(true)
   const [commentsOpen, setCommentsOpen] = useState(true)
   const [commentsFullscreen, setCommentsFullscreen] = useState(false)
-  const [splitView, setSplitView] = useState(false) // 関連動画とコメントを半々で全画面表示
+  // 関連動画とコメントを半々で表示。サブ画面は一覧を見るのが主目的なので、これを既定にする
+  // （2026-11-03 の要望。比率は splitRatio として保存され、既定は半々）
+  const [splitView, setSplitView] = useState(true)
   const [splitHorizontal, setSplitHorizontal] = useState(false) // true=左右分割 / false=上下分割
   const [splitRatio, setSplitRatio] = useState(0.5) // 関連動画側が占める割合（0.2〜0.8）
   const [windowFullscreen, setWindowFullscreen] = useState(false)
@@ -1370,12 +1372,7 @@ function VideoActions({ videoId, rating, live, currentTime, tabId, t, inlineTitl
     else if (!res.data.applied) setRateError(t.errRateFailed)
   }
 
-  // 開始位置は共有欄を開いた時点の再生位置で固定する（YouTube の共有ダイアログと同じ）
-  const [shareOpen, setShareOpen] = useState(false)
-  const [startAt, setStartAt] = useState(0)
-  const [withStart, setWithStart] = useState(false)
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle")
-  const shareUrl = buildShareUrl(videoId, withStart && !live ? startAt : null)
 
   const copyToClipboard = async (url: string) => {
     try {
@@ -1388,25 +1385,11 @@ function VideoActions({ videoId, rating, live, currentTime, tabId, t, inlineTitl
   }
 
   /**
-   * 共有ボタン。押した時点でリンクをクリップボードへ入れる（欄を開いてからもう一度押させない）。
-   * 開始位置を変えたい・リンクを見たいときのために、欄と「コピー」ボタンはそのまま残す。
-   * ★ コピーするURLは、描画済みの shareUrl ではなく**ここで計算した開始位置**から組み立てる。
-   *   setStartAt は次の描画まで反映されないため、前回「開始位置つき」で閉じてから開き直すと、
-   *   shareUrl は前回の位置のままで、今の位置と違うリンクをコピーしてしまう。
+   * 共有は「押したらコピー」だけ。クリップボードに入っているものを画面に出して読ませる意味が
+   * ないので、URLの欄は持たない（2026-11-03 の要望「コピペしてるならわざわざ表示しなくてもいい」）。
+   * 開始位置つきのリンクは隣のボタンで取る。★押した時点の再生位置で組み立てること。
    */
-  const toggleShare = () => {
-    if (shareOpen) {
-      setShareOpen(false)
-      setCopyState("idle")
-      return
-    }
-    const start = Math.floor(currentTime)
-    setStartAt(start)
-    setShareOpen(true)
-    void copyToClipboard(buildShareUrl(videoId, withStart && !live ? start : null))
-  }
-
-  const copyShareUrl = () => copyToClipboard(shareUrl)
+  const startHere = Math.floor(currentTime)
 
   const pillButton = "flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition disabled:opacity-40"
 
@@ -1442,53 +1425,31 @@ function VideoActions({ videoId, rating, live, currentTime, tabId, t, inlineTitl
             </button>
           </div>
         )}
-        <button
-          onClick={toggleShare}
-          aria-expanded={shareOpen}
-          aria-label={t.shareAndCopy}
-          title={t.shareAndCopy}
-          className={`${pillButton} rounded-full bg-neutral-800 text-neutral-300 hover:bg-neutral-700`}>
-          <Share2 size={14} />
-          {t.share}
-        </button>
+        <div role="group" aria-label={t.share} className="flex items-center overflow-hidden rounded-full bg-neutral-800">
+          <button
+            onClick={() => void copyToClipboard(buildShareUrl(videoId, null))}
+            aria-label={t.shareAndCopy}
+            title={t.shareAndCopy}
+            className={`${pillButton} text-neutral-300 hover:bg-neutral-700`}>
+            {copyState === "copied" ? <Check size={14} /> : <Share2 size={14} />}
+            {copyState === "copied" ? t.copied : t.share}
+          </button>
+          {!live && (
+            <>
+              <span className="h-5 w-px bg-neutral-700" aria-hidden="true" />
+              <button
+                onClick={() => void copyToClipboard(buildShareUrl(videoId, startHere))}
+                aria-label={t.shareStartAt(fmt(startHere))}
+                title={t.shareStartAt(fmt(startHere))}
+                className={`${pillButton} tabular-nums text-neutral-400 hover:bg-neutral-700`}>
+                {fmt(startHere)}
+              </button>
+            </>
+          )}
+        </div>
       </div>
       {rateError && <p className="mt-1.5 text-[11px] leading-snug text-red-400">{rateError}</p>}
-
-      {shareOpen && (
-        <div className="mt-2 rounded-lg bg-neutral-800 p-2.5">
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              readOnly
-              value={shareUrl}
-              aria-label={t.shareLinkLabel}
-              onFocus={(e) => e.currentTarget.select()}
-              className="min-w-0 flex-1 rounded bg-neutral-900 px-2 py-1 font-mono text-[11px] text-neutral-300 focus:outline-none focus:ring-1 focus:ring-neutral-600"
-            />
-            <button
-              onClick={() => void copyShareUrl()}
-              className="flex shrink-0 items-center gap-1 rounded bg-neutral-100 px-2.5 py-1 text-[11px] font-medium text-neutral-900 transition hover:bg-white active:scale-95">
-              {copyState === "copied" ? <Check size={12} /> : <ClipboardCopy size={12} />}
-              {copyState === "copied" ? t.copied : t.copyLink}
-            </button>
-          </div>
-          {!live && (
-            <label className="mt-2 flex w-fit cursor-pointer items-center gap-1.5 text-[11px] tabular-nums text-neutral-400">
-              <input
-                type="checkbox"
-                checked={withStart}
-                onChange={(e) => {
-                  setWithStart(e.target.checked)
-                  setCopyState("idle")
-                }}
-                className="accent-red-600"
-              />
-              {t.shareStartAt(fmt(startAt))}
-            </label>
-          )}
-          {copyState === "failed" && <p className="mt-1.5 text-[11px] text-red-400">{t.errCopyFailed}</p>}
-        </div>
-      )}
+      {copyState === "failed" && <p className="mt-1.5 text-[11px] text-red-400">{t.errCopyFailed}</p>}
     </div>
   )
 }

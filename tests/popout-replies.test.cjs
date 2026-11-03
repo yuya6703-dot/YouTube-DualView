@@ -222,57 +222,42 @@ test("the rating buttons mirror the main window and never flip on their own when
 
 test("without rating buttons on the main window only sharing is offered", async (t) => {
   const { container, button } = await renderActions(t, { rating: null })
-  assert.equal(container.querySelector("[role=group]"), null)
+  // 共有も2つのボタンを1つの group にまとめているので、評価の group だけを見る
+  assert.ok(!button("高く評価") && !button("低く評価"), "no rating buttons")
   assert.ok(button("共有"))
 })
 
-test("share copies a youtu.be link, optionally starting where the video was when share was opened", async (t) => {
-  const { container, draw, button, press, input } = await renderActions(t, {})
-  await press(button("共有"))
-  assert.equal(input().value, "https://youtu.be/aaaaaaaaaaa")
-  assert.match(container.textContent, /開始位置 1:23/)
-
-  await draw({ currentTime: 200 }) // 再生が進んでも、開いた時点の位置のまま
-  assert.match(container.textContent, /開始位置 1:23/)
-  await press(container.querySelector("input[type=checkbox]"))
-  assert.equal(input().value, "https://youtu.be/aaaaaaaaaaa?t=83")
-
-  await press(button("コピー"))
-  assert.equal(copiedToClipboard.at(-1), "https://youtu.be/aaaaaaaaaaa?t=83")
-  assert.ok(button("コピーしました"))
-})
-
-test("pressing share copies the link there and then", async (t) => {
-  const { button, press } = await renderActions(t, {})
+// 共有は「押したらコピー」だけ。クリップボードに入っているものを読ませる欄は出さない
+// （2026-11-03 の要望「コピペしてるならわざわざ表示しなくてもいい」）。
+test("share copies the link and shows no box to read it back from", async (t) => {
+  const { container, button, press } = await renderActions(t, {})
   const copies = copiedToClipboard.length // この配列はテスト間で共有される
   await press(button("共有"))
-  assert.deepEqual(copiedToClipboard.slice(copies), ["https://youtu.be/aaaaaaaaaaa"],
-    "the link is on the clipboard without a second press")
-  assert.ok(button("コピーしました"), "and the sub window says so")
+  assert.deepEqual(copiedToClipboard.slice(copies), ["https://youtu.be/aaaaaaaaaaa"])
+  assert.ok(button("コピーしました"), "the button itself confirms the copy")
+  assert.ok(!container.querySelector("input"), "nothing puts the URL back on screen")
 })
 
-// 共有欄を「開始位置つき」で閉じてから開き直したとき、開いた時点の再生位置でコピーすること。
-// 開始位置は開くたびに取り直すが、その値は次の描画まで state に入らないので、
-// コピーするURLを描画済みの値から組み立てると前回の位置のままになる。
-test("reopening share copies the position it was reopened at, not the one from last time", async (t) => {
-  const { button, press, input, draw } = await renderActions(t, {})
+// 開始位置つきのリンクは隣のボタンで取る。★押した時点の再生位置で組み立てること。
+// 描画済みの値から作ると、ボタンが現れた時点の位置のままになる。
+test("the position button shares from wherever the video is now", async (t) => {
+  const { button, press, draw } = await renderActions(t, {})
+  const copies = copiedToClipboard.length
+  await press(button("この位置から共有（1:23）"))
+  assert.deepEqual(copiedToClipboard.slice(copies), ["https://youtu.be/aaaaaaaaaaa?t=83"])
+
+  await draw({ currentTime: 200 })
+  await press(button("この位置から共有（3:20）"))
+  assert.deepEqual(copiedToClipboard.slice(copies + 1), ["https://youtu.be/aaaaaaaaaaa?t=200"],
+    "it follows the playhead instead of a position captured earlier")
+})
+
+test("live streams offer no position to share from", async (t) => {
+  const { button, press } = await renderActions(t, { live: true })
   const copies = copiedToClipboard.length
   await press(button("共有"))
-  await press(input("checkbox"))
-  assert.deepEqual(copiedToClipboard.slice(copies), ["https://youtu.be/aaaaaaaaaaa"],
-    "ticking the box alone does not copy again")
-  await press(button("共有")) // 閉じる
-  await draw({ currentTime: 200 })
-  await press(button("共有")) // 開き直す
-  assert.equal(input().value, "https://youtu.be/aaaaaaaaaaa?t=200")
-  assert.deepEqual(copiedToClipboard.slice(copies + 1), ["https://youtu.be/aaaaaaaaaaa?t=200"])
-})
-
-test("live streams are shared without a start position", async (t) => {
-  const { container, button, press, input } = await renderActions(t, { live: true })
-  await press(button("共有"))
-  assert.equal(container.querySelector("input[type=checkbox]"), null)
-  assert.equal(input().value, "https://youtu.be/aaaaaaaaaaa")
+  assert.deepEqual(copiedToClipboard.slice(copies), ["https://youtu.be/aaaaaaaaaaa"])
+  assert.ok(!button("この位置から共有（1:23）"), "a live stream has no meaningful position")
 })
 
 test("split view and fullscreen comments show the title inline next to the buttons", async (t) => {

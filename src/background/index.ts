@@ -99,6 +99,19 @@ async function openOrFocusPopoutOnce(focus: boolean): Promise<number> {
   })
   if (!win?.id) throw new Error("POPOUT_CREATE_FAILED")
 
+  // ★ 画面いっぱいにする（460x940 では「半端にしか表示されない」。2026-11-03 の要望）。
+  //   fullscreen ではない。タイトルバーを消すと閉じる・動かすができなくなるため。
+  //   windows.create は state と left/top/width/height を同時に受け付けないので、
+  //   記憶した位置で作ってから最大化する。最大化は**その位置を含むディスプレイ**で起きるので、
+  //   位置を渡さずに作ると主モニタで最大化され、視聴中の動画を覆ってしまう。
+  //   最大化で onBoundsChanged が発火するが、あちらは state!=="normal" を無視するので
+  //   ユーザーが自分で決めた大きさは上書きされない。
+  try {
+    await chrome.windows.update(win.id, { state: "maximized" })
+  } catch {
+    // 最大化できなくても、ウィンドウ自体は作れている
+  }
+
   await sSet(SESSION_KEYS.popoutWindowId, win.id)
   return win.id
 }
