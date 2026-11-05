@@ -119,6 +119,8 @@ export interface PlayerStatus {
   videoId: string | null
   title: string
   channelName: string
+  channelAvatarUrl: string   // チャンネルのアイコン。読み込み前は空
+  channelSubscribers: string // 登録者数。YouTube の表示文言のまま。非公開なら空
   rating: VideoRating | null // 評価ボタンが見つからなければ null（サブ画面は評価ボタンを出さない）
   channel: ChannelState | null // 登録ボタンが見つからなければ null（サブ画面は登録ボタンを出さない）
   currentTime: number

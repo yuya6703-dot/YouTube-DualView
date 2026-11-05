@@ -191,6 +191,7 @@ async function renderActions(t, props) {
   const draw = (overrides = {}) => act(async () => {
     root.render(React.createElement(testing.VideoActions, {
       videoId: "aaaaaaaaaaa", rating: null, live: false, currentTime: 83.6, tabId: 7, t: getDictionary("ja"),
+      channelName: "", channelAvatarUrl: "", channelSubscribers: "", channel: null,
       ...props, ...overrides
     }))
   })
@@ -291,12 +292,17 @@ test("live streams offer no position to share from", async (t) => {
   assert.ok(!button("この位置から共有（1:23）"), "a live stream has no meaningful position")
 })
 
-// 分割表示（v78で既定）にはチャンネル名が出ていなかった。登録ボタンとあわせてここに出す
-test("the channel name and a subscribe button are offered", async (t) => {
+// 分割表示（v78で既定）にはチャンネル名が出ていなかった。アイコン・登録者数・登録ボタンと
+// あわせて、YouTube本体と同じ「チャンネルの行」としてここに出す
+test("the channel icon, name and subscriber count are offered with the subscribe button", async (t) => {
   const { container, button } = await renderActions(t, {
-    inlineTitle: "サンプル動画", channelName: "Channel X", channel: { subscribed: false }
+    inlineTitle: "サンプル動画", channelName: "Channel X",
+    channelAvatarUrl: "https://yt3.ggpht.com/ch.jpg",
+    channelSubscribers: "チャンネル登録者数 673万人", channel: { subscribed: false }
   })
   assert.match(container.textContent, /Channel X/)
+  assert.match(container.textContent, /チャンネル登録者数 673万人/)
+  assert.equal(container.querySelector("img")?.getAttribute("src"), "https://yt3.ggpht.com/ch.jpg")
   assert.ok(button("チャンネル登録"))
 })
 
@@ -323,11 +329,17 @@ test("without a subscribe button on the main window the sub window offers none",
   assert.ok(!button("チャンネル登録") && !button("登録済み"))
 })
 
-test("split view and fullscreen comments show the title inline next to the buttons", async (t) => {
+// 分割・全画面にはタイトル欄が無いので、1行目にタイトルを出す。操作は2行目に1列でまとめる
+// （要望「評価ボタンと共有ボタンの配置を同じ列に配置しなおしてほしい」）。
+test("split view and fullscreen comments show the title above one row of actions", async (t) => {
   const { container, button } = await renderActions(t, {
-    inlineTitle: "サンプル動画", rating: { liked: false, disliked: false, likeCount: "1.2万" }
+    inlineTitle: "サンプル動画", rating: { liked: false, disliked: false, likeCount: "1.2万" },
+    channelName: "Channel X", channel: { subscribed: false }
   })
-  const row = container.querySelector("div > div")
-  assert.equal(row.querySelector("p")?.textContent, "サンプル動画")
-  assert.ok(row.contains(button("高く評価")) && row.contains(button("共有")), "the title shares one row with the buttons")
+  assert.equal(container.querySelector("p")?.textContent, "サンプル動画", "the title comes first")
+
+  const row = button("チャンネル登録").parentElement
+  assert.ok(row.contains(button("高く評価")), "the rating buttons sit on the channel's row")
+  assert.ok(row.contains(button("共有")), "and so does share")
+  assert.ok(!row.contains(container.querySelector("p")), "the title is not in that row any more")
 })

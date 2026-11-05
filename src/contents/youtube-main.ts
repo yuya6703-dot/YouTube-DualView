@@ -123,7 +123,14 @@ function readChannelState(): ChannelState | null {
 const ratingKey = (rating: VideoRating | null) =>
   rating ? `${rating.liked}:${rating.disliked}:${rating.likeCount ?? ""}` : ""
 /** 一時停止中でも拾いたい「メイン画面で押された」変化。評価と登録状態の両方を見る。 */
-const metaKey = () => `${ratingKey(readVideoRating())}|${readChannelState()?.subscribed ?? ""}`
+const metaKey = () =>
+  [
+    ratingKey(readVideoRating()),
+    readChannelState()?.subscribed ?? "",
+    // アイコンと登録者数は遅れて埋まることがある。一時停止中でも埋まった時点で送り直す
+    q<HTMLImageElement>(SELECTORS.meta.channelAvatar)?.src ?? "",
+    text(SELECTORS.meta.channelSubscribers)
+  ].join("|")
 let lastPushedMetaKey = ""
 
 function buildStatus(): PlayerStatus {
@@ -132,6 +139,8 @@ function buildStatus(): PlayerStatus {
     videoId: getVideoId(),
     title: text(SELECTORS.meta.title),
     channelName: text(SELECTORS.meta.channel),
+    channelAvatarUrl: q<HTMLImageElement>(SELECTORS.meta.channelAvatar)?.src ?? "",
+    channelSubscribers: text(SELECTORS.meta.channelSubscribers),
     rating: readVideoRating(),
     channel: readChannelState(),
     currentTime: v?.currentTime ?? 0,

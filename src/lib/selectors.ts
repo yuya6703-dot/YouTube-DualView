@@ -38,6 +38,17 @@ export const SELECTORS = {
       "ytd-watch-metadata #segmented-dislike-button button",
       "#top-level-buttons-computed dislike-button-view-model button"
     ],
+    // チャンネルのアイコンと登録者数。登録者数は YouTube の表示文言のまま使う
+    //   （"チャンネル登録者数 673万人" / "673K subscribers"）。2026-11-05 実DOMで確認。
+    channelAvatar: [
+      "ytd-watch-metadata #owner yt-img-shadow#avatar img",
+      "ytd-watch-metadata #owner ytd-video-owner-renderer img",
+      "#owner #avatar img"
+    ],
+    channelSubscribers: [
+      "ytd-watch-metadata #owner #owner-sub-count",
+      "#owner yt-formatted-string#owner-sub-count"
+    ],
     // 高評価の件数が入る要素。ボタン全体ではなくここを読む（ボタンには件数以外も入る）。
     likeCount: [
       ".ytSpecButtonShapeNextButtonTextContent",
@@ -633,7 +644,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 81
+export const DIAGNOSE_VERSION = 82
 
 export type DiagnoseReport = {
   v: number

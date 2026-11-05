@@ -588,8 +588,11 @@ test("a nudge inside another nudge's target never lifts that target's clipping, 
 // 文言は言語で変わるので属性で判定する。ベルも button なので、押す対象は先頭の1つに限る。
 const subscribeArea = ({ subscribed = false } = {}) => `
   <ytd-watch-metadata>
-    <div id="owner"><ytd-video-owner-renderer><div id="upload-info">
+    <div id="owner"><ytd-video-owner-renderer>
+      <a><yt-img-shadow id="avatar"><img src="https://yt3.ggpht.com/ch.jpg"></yt-img-shadow></a>
+      <div id="upload-info">
       <ytd-channel-name id="channel-name"><a href="/@ch">Channel X</a></ytd-channel-name>
+      <yt-formatted-string id="owner-sub-count">チャンネル登録者数 673万人</yt-formatted-string>
     </div></ytd-video-owner-renderer></div>
     <div id="subscribe-button"><ytd-subscribe-button-renderer ${subscribed ? 'subscribed=""' : ""}>
       <yt-smartimation><yt-button-shape>
@@ -611,6 +614,15 @@ test("the channel subscription state is read from the subscribe button's own att
   // SPA遷移直後に残っている前の動画のボタンは、今の動画のものとして扱わない
   h.doc.querySelector("ytd-watch-flexy").setAttribute("video-id", "previous")
   assert.equal(h.api.readChannelState(), null)
+})
+
+test("the channel icon and subscriber count travel with the status", async (t) => {
+  const h = setup(t, subscribeArea())
+  const status = await h.handlers.PLAYER_GET_STATUS(undefined)
+  assert.equal(status.channelName, "Channel X")
+  assert.equal(status.channelSubscribers, "チャンネル登録者数 673万人",
+    "YouTube の表示文言のまま渡す（言語ごとの言い回しを作らない）")
+  assert.match(status.channelAvatarUrl, /ch\.jpg$/)
 })
 
 test("subscribing clicks the main window's button and reports whether YouTube applied it", async (t) => {

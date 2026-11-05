@@ -651,6 +651,8 @@ export default function Popout() {
       videoId={currentVideoId}
       rating={status?.rating ?? null}
       channelName={status?.channelName ?? ""}
+      channelAvatarUrl={status?.channelAvatarUrl ?? ""}
+      channelSubscribers={status?.channelSubscribers ?? ""}
       channel={status?.channel ?? null}
       live={live}
       currentTime={displayTime}
@@ -878,14 +880,14 @@ export default function Popout() {
                 <p className="line-clamp-2 text-base font-medium leading-snug">
                   {status?.title || "—"}
                 </p>
-                <p className="mt-1 text-xs text-neutral-500">
-                  {status?.channelName || "—"}
-                  {live && (
-                    <span className="ml-2 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold">
+                {/* チャンネル名はこの下の「チャンネルの行」に移した（二重に出さない） */}
+                {live && (
+                  <p className="mt-1">
+                    <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold">
                       LIVE
                     </span>
-                  )}
-                </p>
+                  </p>
+                )}
               </div>
               {playerOpen ? (
                 <ChevronUp size={16} className="mt-1 shrink-0 text-neutral-500" />
@@ -1360,10 +1362,15 @@ function buildShareUrl(videoId: string, startSeconds: number | null): string {
  * ★ 共有はメイン画面の共有ダイアログを開かない（全画面での視聴を邪魔するため）。
  *   リンクをここで組み立ててクリップボードへコピーする。外部への送信は無い。
  */
-function VideoActions({ videoId, rating, channelName, channel, live, currentTime, tabId, t, inlineTitle }: {
+function VideoActions({
+  videoId, rating, channelName, channelAvatarUrl, channelSubscribers, channel,
+  live, currentTime, tabId, t, inlineTitle
+}: {
   videoId: string
   rating: VideoRating | null
   channelName: string
+  channelAvatarUrl: string
+  channelSubscribers: string
   channel: ChannelState | null
   live: boolean
   currentTime: number
@@ -1433,11 +1440,42 @@ function VideoActions({ videoId, rating, channelName, channel, live, currentTime
 
   return (
     <div className={inlineTitle === undefined ? "mb-4" : "mb-3 shrink-0"}>
+      {/* 分割・全画面にはタイトル欄が無いので、ここで1行目に出す */}
+      {inlineTitle !== undefined && (
+        <p title={inlineTitle} className="mb-1.5 truncate text-sm font-medium text-neutral-200">
+          {inlineTitle || "—"}
+        </p>
+      )}
+      {/* YouTube本体の「チャンネルの行」と同じ並び。アイコン・名前と登録者数・登録のあとに評価と共有を置く
+          （2026-11-05 の要望「評価ボタンと共有ボタンの配置を同じ列に配置しなおしてほしい」） */}
       <div className="flex flex-wrap items-center gap-2">
-        {inlineTitle !== undefined && (
-          <p title={inlineTitle} className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-200">
-            {inlineTitle || "—"}
+        <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-neutral-800">
+          {channelAvatarUrl && (
+            <img src={channelAvatarUrl} alt="" className="h-full w-full object-cover" />
+          )}
+        </div>
+        <div className="mr-1 min-w-0 max-w-[45%]">
+          <p title={channelName} className="truncate text-xs font-medium text-neutral-200">
+            {channelName || "—"}
           </p>
+          {channelSubscribers && (
+            <p className="truncate text-[10px] tabular-nums text-neutral-500">{channelSubscribers}</p>
+          )}
+        </div>
+        {channel && (
+          <button
+            onClick={() => void subscribe()}
+            disabled={tabId === null || subscribeBusy || channel.subscribed}
+            aria-label={channel.subscribed ? t.subscribed : t.subscribe}
+            title={channel.subscribed ? t.subscribedHint : t.subscribe}
+            className={`${pillButton} rounded-full ${
+              channel.subscribed
+                ? "bg-neutral-800 text-neutral-400"
+                : "bg-neutral-100 text-neutral-900 hover:bg-white active:scale-95"
+            }`}>
+            {channel.subscribed ? <Check size={14} /> : <Plus size={14} />}
+            {channel.subscribed ? t.subscribed : t.subscribe}
+          </button>
         )}
         {rating && (
           <div role="group" aria-label={t.ratingGroupLabel} className="flex items-center overflow-hidden rounded-full bg-neutral-800">
@@ -1486,31 +1524,6 @@ function VideoActions({ videoId, rating, channelName, channel, live, currentTime
           )}
         </div>
       </div>
-      {(channel || (inlineTitle !== undefined && channelName)) && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-2">
-          {/* 通常表示ではタイトルの下に既にチャンネル名が出ているので、そこに無い表示のときだけ出す */}
-          {inlineTitle !== undefined && channelName && (
-            <p title={channelName} className="min-w-0 max-w-full truncate text-xs text-neutral-400">
-              {channelName}
-            </p>
-          )}
-          {channel && (
-            <button
-              onClick={() => void subscribe()}
-              disabled={tabId === null || subscribeBusy || channel.subscribed}
-              aria-label={channel.subscribed ? t.subscribed : t.subscribe}
-              title={channel.subscribed ? t.subscribedHint : t.subscribe}
-              className={`${pillButton} rounded-full ${
-                channel.subscribed
-                  ? "bg-neutral-800 text-neutral-400"
-                  : "bg-neutral-100 text-neutral-900 hover:bg-white active:scale-95"
-              }`}>
-              {channel.subscribed ? <Check size={14} /> : <Plus size={14} />}
-              {channel.subscribed ? t.subscribed : t.subscribe}
-            </button>
-          )}
-        </div>
-      )}
       {rateError && <p className="mt-1.5 text-[11px] leading-snug text-red-400">{rateError}</p>}
       {subscribeError && <p className="mt-1.5 text-[11px] leading-snug text-red-400">{subscribeError}</p>}
       {copyState === "failed" && <p className="mt-1.5 text-[11px] text-red-400">{t.errCopyFailed}</p>}

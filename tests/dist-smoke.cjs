@@ -244,6 +244,7 @@ async function subWindow() {
   toSubWindow({ type: "STATUS", payload: {
     videoId: "aaaaaaaaaaa", title: "Video", channelName: "Channel X", rating: null,
     channel: { subscribed: false },
+    channelAvatarUrl: "https://yt3.ggpht.com/ch.jpg", channelSubscribers: "チャンネル登録者数 673万人",
     currentTime: 83, duration: 300, volume: 50, muted: false, playbackRate: 1,
     paused: true, ended: false, kind: "video", sampledAt: Date.now()
   } })
@@ -256,9 +257,15 @@ async function subWindow() {
   assert.equal(sized.length, 1, "E: 関連動画側が比率を持つ")
   assert.match(sized[0].getAttribute("style"), /flex-basis: 50%/, "E: 既定は半々")
 
-  // チャンネル名と登録ボタン（v80）。分割表示にはチャンネル名が出ていなかった
+  // チャンネルの行（v80/v82）。アイコン・名前・登録者数・登録ボタンと、評価・共有が1列に並ぶ
   assert.ok(doc.body.textContent.includes("Channel X"), "E: チャンネル名が出る")
-  assert.ok(button("チャンネル登録"), "E: 登録ボタンが出る")
+  assert.ok(doc.body.textContent.includes("チャンネル登録者数 673万人"), "E: 登録者数が出る")
+  assert.ok([...doc.querySelectorAll("img")].some((i) => i.getAttribute("src") === "https://yt3.ggpht.com/ch.jpg"),
+    "E: チャンネルアイコンが出る")
+  const subscribeButton = button("チャンネル登録")
+  assert.ok(subscribeButton, "E: 登録ボタンが出る")
+  const ownerRow = subscribeButton.parentElement
+  assert.ok(ownerRow.contains(button("共有リンクをコピー")), "E: 共有が同じ列にある")
 
   // 共有は押したらコピー。URLの欄は出さない（v78）
   const share = button("共有リンクをコピー")
