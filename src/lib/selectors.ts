@@ -37,6 +37,22 @@ export const SELECTORS = {
       "ytd-watch-metadata dislike-button-view-model button",
       "ytd-watch-metadata #segmented-dislike-button button",
       "#top-level-buttons-computed dislike-button-view-model button"
+    ],
+    // チャンネル登録ボタンの入れ物。登録済みかどうかはこの要素の `subscribed` 属性で分かる。
+    // ★ 2026-11-05 実DOMで確認: 未登録は属性なし・文言「チャンネル登録」、
+    //   登録済みは `subscribed` が付き・文言「登録済み」＋通知ベルのボタンが現れる。
+    //   文言は言語で変わるので属性で判定する。評価ボタンと同じく ytd-watch-metadata に絞る。
+    subscribeHost: [
+      "ytd-watch-metadata #subscribe-button ytd-subscribe-button-renderer",
+      "ytd-watch-metadata ytd-subscribe-button-renderer",
+      "#owner ytd-subscribe-button-renderer"
+    ],
+    // ★ 入れ物の中には通知ベルのボタンもあるが、文書順で登録ボタンが先（実DOMで確認）。
+    //   先頭一致で登録ボタンを取る。
+    subscribeButton: [
+      "ytd-watch-metadata #subscribe-button ytd-subscribe-button-renderer button",
+      "ytd-watch-metadata ytd-subscribe-button-renderer button",
+      "#owner ytd-subscribe-button-renderer button"
     ]
   },
 
@@ -612,7 +628,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 79
+export const DIAGNOSE_VERSION = 80
 
 export type DiagnoseReport = {
   v: number

@@ -86,7 +86,7 @@ function setup(t, html, video = "current") {
       items: () => Array.from(commentItemCache.values()),
       loadMoreComments, commentsReachedEnd, commentsAreDefinitelyEmpty,
       findTopLevelCommentContinuation, stopWatchPageObservers, fetchRelated, nudgeIntoViewport,
-      readVideoRating
+      readVideoRating, readChannelState
     }
   `)
   const port = { postMessage: (event) => events.push(event) }
@@ -582,6 +582,72 @@ test("a nudge inside another nudge's target never lifts that target's clipping, 
 // （.ytp-fullscreen-grid の videowall still）が #columns より文書順で前にあり、
 // document 全体の先頭一致だとそちらを掴む（2026-09-21 実DOMで関連動画6件すべてが still に一致）。
 // still のクリックはプレイヤー自身のエンドスクリーン用の遷移で、全画面グリッドの状態遷移を伴う。
+// チャンネル登録ボタン。2026-11-05 実DOMで確認:
+//   未登録   … ytd-subscribe-button-renderer に属性なし / 文言「チャンネル登録」
+//   登録済み … `subscribed=""` が付く / 文言「登録済み」＋通知ベルのボタンが現れる
+// 文言は言語で変わるので属性で判定する。ベルも button なので、押す対象は先頭の1つに限る。
+const subscribeArea = ({ subscribed = false } = {}) => `
+  <ytd-watch-metadata>
+    <div id="owner"><ytd-video-owner-renderer><div id="upload-info">
+      <ytd-channel-name id="channel-name"><a href="/@ch">Channel X</a></ytd-channel-name>
+    </div></ytd-video-owner-renderer></div>
+    <div id="subscribe-button"><ytd-subscribe-button-renderer ${subscribed ? 'subscribed=""' : ""}>
+      <yt-smartimation><yt-button-shape>
+        <button aria-label="Channel X ${subscribed ? "のチャンネル登録を解除" : "をチャンネル登録"}">${subscribed ? "登録済み" : "チャンネル登録"}</button>
+      </yt-button-shape>
+      <div id="notification-preference-toggle-button"><button aria-label="通知設定"></button></div>
+      </yt-smartimation>
+    </ytd-subscribe-button-renderer></div>
+  </ytd-watch-metadata>`
+const subscribeButton = (h) => h.doc.querySelector("ytd-subscribe-button-renderer button")
+
+test("the channel subscription state is read from the subscribe button's own attribute", (t) => {
+  const h = setup(t, subscribeArea())
+  assert.deepEqual(plain(h.api.readChannelState()), { subscribed: false })
+
+  h.doc.querySelector("ytd-subscribe-button-renderer").setAttribute("subscribed", "")
+  assert.deepEqual(plain(h.api.readChannelState()), { subscribed: true })
+
+  // SPA遷移直後に残っている前の動画のボタンは、今の動画のものとして扱わない
+  h.doc.querySelector("ytd-watch-flexy").setAttribute("video-id", "previous")
+  assert.equal(h.api.readChannelState(), null)
+})
+
+test("subscribing clicks the main window's button and reports whether YouTube applied it", async (t) => {
+  const h = setup(t, subscribeArea())
+  const host = h.doc.querySelector("ytd-subscribe-button-renderer")
+  // YouTube の契約: ログイン中なら押した少し後に subscribed が付く
+  subscribeButton(h).addEventListener("click", () => h.win.setTimeout(() => host.setAttribute("subscribed", ""), 50))
+  h.start()
+  const pending = h.handlers.CHANNEL_SUBSCRIBE(undefined)
+  await h.advance(1200)
+  assert.deepEqual(plain(await pending), { channel: { subscribed: true }, applied: true })
+  const status = h.events.filter((e) => e.type === "STATUS").at(-1)
+  assert.equal(status.payload.channel.subscribed, true, "the new state is pushed even while the video is paused")
+})
+
+// ★ 登録済みのボタンを押すと、YouTube は「登録を解除」を含むメニューを開く。
+//   サブ画面からの登録要求で、解除の入口を誤って開かないこと。
+test("an already-subscribed channel is never clicked", async (t) => {
+  const h = setup(t, subscribeArea({ subscribed: true }))
+  let clicks = 0
+  subscribeButton(h).addEventListener("click", () => clicks++)
+  const pending = h.handlers.CHANNEL_SUBSCRIBE(undefined)
+  await h.advance(1200)
+  assert.deepEqual(plain(await pending), { channel: { subscribed: true }, applied: false })
+  assert.equal(clicks, 0, "the unsubscribe menu is never opened from the sub window")
+})
+
+test("a subscription YouTube does not apply (logged out) is reported as not applied", async (t) => {
+  const h = setup(t, subscribeArea())
+  let clicks = 0
+  subscribeButton(h).addEventListener("click", () => clicks++) // ログイン案内を出すだけで状態は変えない
+  const pending = h.handlers.CHANNEL_SUBSCRIBE(undefined)
+  await h.advance(1200)
+  assert.deepEqual(plain(await pending), { channel: { subscribed: false }, applied: false })
+  assert.equal(clicks, 1, "the button is pressed exactly once")
+})
+
 test("playing a related video clicks its card in the related list, not the player's videowall still", async (t) => {
   const h = setup(t, `<div id="related"><ytd-watch-next-secondary-results-renderer><div id="items">
     ${lockupCard("aaaaaaaaaaa", "Title A", "Channel A", lockupMetaRow("168万", "5 か月前"))}

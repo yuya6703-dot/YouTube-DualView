@@ -20,6 +20,7 @@ import {
   type StreamCommand,
   type StreamEvent,
   type VideoKind,
+  type ChannelState,
   type VideoRating,
   type VideoRatingAction
 } from "~lib/messaging"
@@ -82,9 +83,29 @@ function readVideoRating(): VideoRating | null {
   }
 }
 
+/**
+ * チャンネル登録ボタンの入れ物。評価ボタンと同じく、SPA遷移直後に残っている
+ * 前の動画のボタンを今の動画のものとして扱わない。
+ */
+function findSubscribeHost(): HTMLElement | null {
+  const videoId = getVideoId()
+  if (!videoId) return null
+  const host = q<HTMLElement>(SELECTORS.meta.subscribeHost)
+  const ownerVideoId = host?.closest("ytd-watch-flexy")?.getAttribute("video-id")
+  return ownerVideoId && ownerVideoId !== videoId ? null : host
+}
+
+/** 登録済みかどうか。文言は言語で変わるので、YouTube が付ける `subscribed` 属性だけを見る。 */
+function readChannelState(): ChannelState | null {
+  const host = findSubscribeHost()
+  return host ? { subscribed: host.hasAttribute("subscribed") } : null
+}
+
 const ratingKey = (rating: VideoRating | null) =>
   rating ? `${rating.liked}:${rating.disliked}:${rating.likeCount ?? ""}` : ""
-let lastPushedRatingKey = ""
+/** 一時停止中でも拾いたい「メイン画面で押された」変化。評価と登録状態の両方を見る。 */
+const metaKey = () => `${ratingKey(readVideoRating())}|${readChannelState()?.subscribed ?? ""}`
+let lastPushedMetaKey = ""
 
 function buildStatus(): PlayerStatus {
   const v = getVideo()
@@ -93,6 +114,7 @@ function buildStatus(): PlayerStatus {
     title: text(SELECTORS.meta.title),
     channelName: text(SELECTORS.meta.channel),
     rating: readVideoRating(),
+    channel: readChannelState(),
     currentTime: v?.currentTime ?? 0,
     // ライブ配信では duration が Infinity になるため 0 に潰す
     duration: v && Number.isFinite(v.duration) ? v.duration : 0,
@@ -180,7 +202,7 @@ function makePageState(
 const pushStatus = () => {
   if (ports.size === 0) return
   const status = buildStatus()
-  lastPushedRatingKey = ratingKey(status.rating)
+  lastPushedMetaKey = metaKey()
   emit({ type: "STATUS", payload: status })
 }
 
@@ -288,7 +310,7 @@ setInterval(() => {
   onNavigated()
   // 一時停止中は STATUS が流れないため、メイン画面で評価を押した・遷移後に評価欄が遅れて出来た、
   // といった変化をここで拾う。サブ画面の表示が実態とずれたままだと、押したボタンが逆の意味になる。
-  if (ratingKey(readVideoRating()) !== lastPushedRatingKey) pushStatus()
+  if (metaKey() !== lastPushedMetaKey) pushStatus()
   // ★ 監視対象がページから切り離されていたら張り直す。
   //   YouTubeがSPA遷移でコンテナ要素ごと差し替えると、MutationObserverは
   //   detachedな古い要素を見続けて沈黙し、前の動画の情報が残り続ける。
@@ -2854,6 +2876,29 @@ registerHandlers({
     // 一時停止中は STATUS が流れないため、ここで送ってサブ画面の表示を実態へ合わせる
     pushStatus()
     return { rating: readVideoRating(), applied }
+  },
+  CHANNEL_SUBSCRIBE: async () => {
+    const videoId = getVideoId()
+    const before = readChannelState()
+    const button = q<HTMLElement>(SELECTORS.meta.subscribeButton)
+    // ★ 登録済みのボタンは押さない。YouTube はそれを押すと「登録を解除」を含むメニューを開くため、
+    //   サブ画面からの登録要求が解除の入口になってしまう。解除はメイン画面で行ってもらう。
+    if (!before || before.subscribed || !button || button.matches(":disabled, [disabled], [aria-disabled='true']")) {
+      return { channel: before, applied: false }
+    }
+    button.click()
+
+    // 評価と同じ扱い。未ログインだとログイン案内を出すだけで状態が変わらないので、
+    // 一定時間待っても変わらなければ「反映されなかった」として返す。
+    let applied = false
+    for (let attempt = 0; attempt < 8 && !applied; attempt++) {
+      await new Promise((resolve) => window.setTimeout(resolve, 125))
+      if (getVideoId() !== videoId) break
+      applied = readChannelState()?.subscribed === true
+    }
+    // 一時停止中は STATUS が流れないため、ここで送ってサブ画面の表示を実態へ合わせる
+    pushStatus()
+    return { channel: readChannelState(), applied }
   },
   DIAGNOSE_SELECTORS: () => ({ v: DIAGNOSE_VERSION, checks: diagnoseDetail(), samples: sampleOutlines() })
 })

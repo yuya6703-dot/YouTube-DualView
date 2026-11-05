@@ -12,7 +12,7 @@
  *   B 通常のページ                  … 従来どおりコメントがサブ画面へ流れる
  *   C 前の動画のDOMが残っている     … 従来どおりパネル経由で読み込みを起動する（2026-09-17の契約）
  *   D 動画の評価（v75）             … プレイヤー内のボタンではなく ytd-watch-metadata 側から読む
- *   E サブ画面（v78）               … ビルド済みの popout を起動し、開いた時点の表示と共有の挙動を見る
+ *   E サブ画面（v78/v80）           … ビルド済みの popout を起動し、開いた時点の表示・共有・チャンネル登録を見る
  *
  * ★ E を入れるまで、配布物の確認は content script だけだった。サブ画面側の変更
  *   （v76 の共有、v78 の分割・共有）は毎回その場限りのスクリプトで確かめており、
@@ -235,7 +235,8 @@ async function subWindow() {
   for (let i = 0; i < 50 && !toSubWindow; i++) await wait(100)
   assert.ok(toSubWindow, "E: サブ画面がメイン画面のPortへ繋ぐ")
   toSubWindow({ type: "STATUS", payload: {
-    videoId: "aaaaaaaaaaa", title: "Video", channelName: "Channel", rating: null,
+    videoId: "aaaaaaaaaaa", title: "Video", channelName: "Channel X", rating: null,
+    channel: { subscribed: false },
     currentTime: 83, duration: 300, volume: 50, muted: false, playbackRate: 1,
     paused: true, ended: false, kind: "video", sampledAt: Date.now()
   } })
@@ -247,6 +248,10 @@ async function subWindow() {
   assert.equal(panes.length, 2, "E: 開いた時点で関連動画とコメントが並ぶ")
   assert.equal(sized.length, 1, "E: 関連動画側が比率を持つ")
   assert.match(sized[0].getAttribute("style"), /flex-basis: 50%/, "E: 既定は半々")
+
+  // チャンネル名と登録ボタン（v80）。分割表示にはチャンネル名が出ていなかった
+  assert.ok(doc.body.textContent.includes("Channel X"), "E: チャンネル名が出る")
+  assert.ok(button("チャンネル登録"), "E: 登録ボタンが出る")
 
   // 共有は押したらコピー。URLの欄は出さない（v78）
   const share = button("共有リンクをコピー")
@@ -276,7 +281,7 @@ async function subWindow() {
     "E: 連続でコピーしても、前回のタイマーに表示を消されない")
 
   console.log("E サブ画面               →", JSON.stringify(panes.map((p) => p.querySelector("p")?.textContent.trim())),
-    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持")
+    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持 / チャンネル名と登録ボタン: あり")
   win.close()
 }
 

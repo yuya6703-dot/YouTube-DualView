@@ -110,11 +110,17 @@ export interface VideoRating {
 
 export type VideoRatingAction = "like" | "dislike"
 
+/** 動画の投稿チャンネル。登録ボタンが見つからなければ status の channel ごと null になる。 */
+export interface ChannelState {
+  subscribed: boolean
+}
+
 export interface PlayerStatus {
   videoId: string | null
   title: string
   channelName: string
   rating: VideoRating | null // 評価ボタンが見つからなければ null（サブ画面は評価ボタンを出さない）
+  channel: ChannelState | null // 登録ボタンが見つからなければ null（サブ画面は登録ボタンを出さない）
   currentTime: number
   duration: number
   volume: number       // 0-100（HTMLVideoElement の 0-1 から変換済み）
@@ -177,6 +183,9 @@ export type Contract = {
   // 動画の高評価/低評価をトグルする。COMMENT_TOGGLE_LIKE と同じくメイン画面のボタンを押して読み戻す。
   // applied: false は押しても状態が変わらなかった（未ログインでログイン案内が出た等）。
   VIDEO_RATE: { req: { action: VideoRatingAction }; res: { rating: VideoRating | null; applied: boolean } }
+  // チャンネル登録。★解除は扱わない。登録済みのボタンを押すと YouTube は「登録を解除」を含む
+  // メニューを開くため、サブ画面からの要求では登録済みのボタンを絶対に押さない。
+  CHANNEL_SUBSCRIBE: { req: void; res: { channel: ChannelState | null; applied: boolean } }
   DIAGNOSE_SELECTORS: { req: void;                    res: DiagnoseReport }
 
   /* --- 受け手: Service Worker --- */

@@ -37,6 +37,7 @@ import {
   type RelatedDisplaySize,
   type Settings,
   type TimestampNote,
+  type ChannelState,
   type VideoRating,
   type VideoRatingAction
 } from "~lib/messaging"
@@ -649,6 +650,8 @@ export default function Popout() {
       key={currentVideoId}
       videoId={currentVideoId}
       rating={status?.rating ?? null}
+      channelName={status?.channelName ?? ""}
+      channel={status?.channel ?? null}
       live={live}
       currentTime={displayTime}
       tabId={tabId}
@@ -1357,9 +1360,11 @@ function buildShareUrl(videoId: string, startSeconds: number | null): string {
  * ★ 共有はメイン画面の共有ダイアログを開かない（全画面での視聴を邪魔するため）。
  *   リンクをここで組み立ててクリップボードへコピーする。外部への送信は無い。
  */
-function VideoActions({ videoId, rating, live, currentTime, tabId, t, inlineTitle }: {
+function VideoActions({ videoId, rating, channelName, channel, live, currentTime, tabId, t, inlineTitle }: {
   videoId: string
   rating: VideoRating | null
+  channelName: string
+  channel: ChannelState | null
   live: boolean
   currentTime: number
   tabId: number | null
@@ -1378,6 +1383,23 @@ function VideoActions({ videoId, rating, live, currentTime, tabId, t, inlineTitl
     setRateBusy(false)
     if (isErr(res)) setRateError(t.errCommMain)
     else if (!res.data.applied) setRateError(t.errRateFailed)
+  }
+
+  const [subscribeBusy, setSubscribeBusy] = useState(false)
+  const [subscribeError, setSubscribeError] = useState<string | null>(null)
+
+  /**
+   * チャンネル登録。★登録済みのときは何もしない。YouTube は登録済みのボタンを押すと
+   * 「登録を解除」を含むメニューを開くため、サブ画面からは押させない（CS側でも弾いている）。
+   */
+  const subscribe = async () => {
+    if (tabId === null || subscribeBusy || !channel || channel.subscribed) return
+    setSubscribeBusy(true)
+    setSubscribeError(null)
+    const res = await askContent(tabId, "CHANNEL_SUBSCRIBE", undefined)
+    setSubscribeBusy(false)
+    if (isErr(res)) setSubscribeError(t.errCommMain)
+    else if (!res.data.applied) setSubscribeError(t.errSubscribeFailed)
   }
 
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle")
@@ -1464,7 +1486,33 @@ function VideoActions({ videoId, rating, live, currentTime, tabId, t, inlineTitl
           )}
         </div>
       </div>
+      {(channel || (inlineTitle !== undefined && channelName)) && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          {/* 通常表示ではタイトルの下に既にチャンネル名が出ているので、そこに無い表示のときだけ出す */}
+          {inlineTitle !== undefined && channelName && (
+            <p title={channelName} className="min-w-0 max-w-full truncate text-xs text-neutral-400">
+              {channelName}
+            </p>
+          )}
+          {channel && (
+            <button
+              onClick={() => void subscribe()}
+              disabled={tabId === null || subscribeBusy || channel.subscribed}
+              aria-label={channel.subscribed ? t.subscribed : t.subscribe}
+              title={channel.subscribed ? t.subscribedHint : t.subscribe}
+              className={`${pillButton} rounded-full ${
+                channel.subscribed
+                  ? "bg-neutral-800 text-neutral-400"
+                  : "bg-neutral-100 text-neutral-900 hover:bg-white active:scale-95"
+              }`}>
+              {channel.subscribed ? <Check size={14} /> : <Plus size={14} />}
+              {channel.subscribed ? t.subscribed : t.subscribe}
+            </button>
+          )}
+        </div>
+      )}
       {rateError && <p className="mt-1.5 text-[11px] leading-snug text-red-400">{rateError}</p>}
+      {subscribeError && <p className="mt-1.5 text-[11px] leading-snug text-red-400">{subscribeError}</p>}
       {copyState === "failed" && <p className="mt-1.5 text-[11px] text-red-400">{t.errCopyFailed}</p>}
     </div>
   )

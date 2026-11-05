@@ -291,6 +291,38 @@ test("live streams offer no position to share from", async (t) => {
   assert.ok(!button("この位置から共有（1:23）"), "a live stream has no meaningful position")
 })
 
+// 分割表示（v78で既定）にはチャンネル名が出ていなかった。登録ボタンとあわせてここに出す
+test("the channel name and a subscribe button are offered", async (t) => {
+  const { container, button } = await renderActions(t, {
+    inlineTitle: "サンプル動画", channelName: "Channel X", channel: { subscribed: false }
+  })
+  assert.match(container.textContent, /Channel X/)
+  assert.ok(button("チャンネル登録"))
+})
+
+test("pressing subscribe asks the main window to subscribe", async (t) => {
+  respond = () => ({ ok: true, data: { channel: { subscribed: true }, applied: true } })
+  const { button, press } = await renderActions(t, { channelName: "Channel X", channel: { subscribed: false } })
+  await press(button("チャンネル登録"))
+  assert.deepEqual(sent.at(-1), { tabId: 7, action: "CHANNEL_SUBSCRIBE", payload: undefined })
+})
+
+// 登録済みのボタンを押すと YouTube は解除メニューを開く。サブ画面からは押させない
+test("an already-subscribed channel shows the state without offering a press", async (t) => {
+  const { button, press } = await renderActions(t, { channelName: "Channel X", channel: { subscribed: true } })
+  const subscribed = button("登録済み")
+  assert.ok(subscribed, "the state is shown")
+  assert.equal(subscribed.disabled, true, "but it cannot be pressed")
+  const before = sent.length
+  await press(subscribed)
+  assert.equal(sent.length, before, "nothing is sent to the main window")
+})
+
+test("without a subscribe button on the main window the sub window offers none", async (t) => {
+  const { button } = await renderActions(t, { channelName: "Channel X", channel: null })
+  assert.ok(!button("チャンネル登録") && !button("登録済み"))
+})
+
 test("split view and fullscreen comments show the title inline next to the buttons", async (t) => {
   const { container, button } = await renderActions(t, {
     inlineTitle: "サンプル動画", rating: { liked: false, disliked: false, likeCount: "1.2万" }

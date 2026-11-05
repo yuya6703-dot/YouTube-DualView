@@ -75,6 +75,10 @@ export interface Dictionary {
   dislikeVideo: string
   undislikeVideo: string
   errRateFailed: string
+  subscribe: string
+  subscribed: string
+  subscribedHint: string
+  errSubscribeFailed: string
   share: string
   shareAndCopy: string
   shareStartAt: (time: string) => string
@@ -240,6 +244,10 @@ const ja: Dictionary = {
   dislikeVideo: "低く評価",
   undislikeVideo: "低評価を取り消す",
   errRateFailed: "評価を反映できませんでした。メイン画面でログインしているか確認してください。",
+  subscribe: "チャンネル登録",
+  subscribed: "登録済み",
+  subscribedHint: "登録済み（解除はメイン画面から）",
+  errSubscribeFailed: "チャンネル登録を反映できませんでした",
   share: "共有",
   shareAndCopy: "共有リンクをコピー",
   shareStartAt: (time) => `この位置から共有（${time}）`,
@@ -397,6 +405,10 @@ const en: Dictionary = {
   dislikeVideo: "I dislike this",
   undislikeVideo: "Remove dislike",
   errRateFailed: "Couldn't apply your rating. Check that you're logged in on the main tab.",
+  subscribe: "Subscribe",
+  subscribed: "Subscribed",
+  subscribedHint: "Subscribed (unsubscribe from the main window)",
+  errSubscribeFailed: "YouTube did not apply the subscription",
   share: "Share",
   shareAndCopy: "Copy share link",
   shareStartAt: (time) => `Share from ${time}`,
