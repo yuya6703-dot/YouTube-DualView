@@ -267,6 +267,9 @@ async function subWindow() {
   const ownerRow = subscribeButton.parentElement
   assert.ok(ownerRow.contains(button("共有リンクをコピー")), "E: 共有が同じ列にある")
 
+  // 操作対象のタブIDは出さない（2026-11-05 の要望）。このスモークの対象タブは 7 番
+  assert.ok(!/#\d/.test(doc.body.textContent), "E: 内部のタブ番号を表に出さない")
+
   // 共有は押したらコピー。URLの欄は出さない（v78）
   const share = button("共有リンクをコピー")
   assert.ok(share, "E: 共有ボタンがある")

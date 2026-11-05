@@ -727,11 +727,10 @@ export default function Popout() {
           {windowFullscreen ? <Shrink size={14} /> : <Expand size={14} />}
         </button>
 
+        {/* 操作対象のタブIDは出さない。利用者には意味のない内部の番号で、
+            どのタブを見ているかはタイトルで分かる（2026-11-05 の要望） */}
         <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${badge.cls}`}>
           {badge.label}
-          {tabId !== null && state === "connected" && (
-            <span className="ml-1.5 opacity-60">#{tabId}</span>
-          )}
         </span>
       </form>
 
