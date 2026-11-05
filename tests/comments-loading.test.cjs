@@ -806,6 +806,20 @@ test("the video rating is read from the watch metadata, not the player's own but
   assert.equal(h.api.readVideoRating(), null)
 })
 
+// ★ 件数はロール表示（アニメーション）で、桁ごとに 0-9 の数字列が並ぶ。ボタン全体の文字を
+//   そのまま件数にすると、これがサブ画面に出る。2026-11-05 に実際に出た報告:
+//   いいね84（2桁）の動画で「12345678901234567890123456789 12345678901234567890123456789」。
+test("the rolling animation's digit strips are never shown as the like count", (t) => {
+  const reel = "12345678901234567890123456789"
+  const h = setup(t, ratingButtons({ count: `<span>${reel}</span><span>${reel}</span>` }))
+  assert.deepEqual(plain(h.api.readVideoRating()), { liked: false, disliked: false },
+    "no count at all is better than the animation's scratch digits")
+
+  // 落ち着けば本来の件数になる
+  h.doc.querySelector(".yt-spec-button-shape-next__button-text-content").textContent = "84"
+  assert.deepEqual(plain(h.api.readVideoRating()), { liked: false, disliked: false, likeCount: "84" })
+})
+
 test("rating from the sub window clicks the main window's button and reports whether YouTube applied it", async (t) => {
   const h = setup(t, ratingButtons())
   youtubeRatesOnClick(h)

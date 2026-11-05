@@ -162,11 +162,18 @@ async function videoRating() {
   const h = boot(`<div id="below"></div>${ratingArea("362", "true")}`, { withPlayer: false })
   const status = await h.ask("PLAYER_GET_STATUS", undefined)
   const rating = status?.data?.rating
-  console.log("D 動画の評価             →", JSON.stringify(rating))
   assert.ok(rating, "D: 評価が読める")
   assert.equal(rating.liked, true, "D: プレイヤー内ではなく metadata 側の aria-pressed を読む")
   assert.equal(rating.disliked, false)
   assert.equal(rating.likeCount, "362", "D: 件数も metadata 側のボタンから読む")
+
+  // ★ 件数のロール表示（アニメーション）は桁ごとに 0-9 の数字列が並ぶ。これを件数として
+  //   出すとサブ画面に「12345678901234567890…」が出る（2026-11-05 報告）。出さないこと。
+  const reel = "1234567890".repeat(3).slice(0, 29)
+  h.doc.querySelector("ytd-watch-metadata like-button-view-model button").textContent = reel + reel
+  const rolling = (await h.ask("PLAYER_GET_STATUS", undefined))?.data?.rating
+  assert.equal(rolling.likeCount, undefined, "D: ロール表示中は件数を出さない")
+  console.log("D 動画の評価             →", JSON.stringify(rating), "/ ロール表示中の件数:", JSON.stringify(rolling.likeCount))
   h.win.close()
 }
 

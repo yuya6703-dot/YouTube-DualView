@@ -70,16 +70,35 @@ function findRatingButton(action: VideoRatingAction): HTMLElement | null {
   return ownerVideoId && ownerVideoId !== videoId ? null : button
 }
 
+/**
+ * 高評価の件数。YouTube の表示文言のまま返す（"1.2万" / "12K"）。
+ *
+ * ★ ボタン全体の textContent を使ってはいけない。YouTube は件数をロール表示（数字が回る
+ *   アニメーション）で描くことがあり、そのとき桁ごとに 0-9 の数字列が DOM に並ぶ。
+ *   これをそのまま件数にすると、サブ画面に「12345678901234567890123456789 …」が出る
+ *   （2026-11-05 報告。いいね84＝2桁の動画で、数字列がちょうど2本出ていた）。
+ *   件数の表示文言に 0-9 が全部そろうことはない（大きい数は "2012万" のように省略される）ので、
+ *   そろっていたらロール表示中とみなして件数を出さない。落ち着けば次の STATUS で正しい値になる。
+ */
+function readVideoLikeCount(like: HTMLElement | null): string | undefined {
+  if (!like) return undefined
+  const text = (q<HTMLElement>(SELECTORS.meta.likeCount, like) ?? like).textContent ?? ""
+  const count = text.replace(/\s+/g, " ").trim()
+  // 件数を非公開にした動画では数字の無い文言（または空）になる
+  if (!/\d/.test(count)) return undefined
+  const rolling = "0123456789".split("").every((digit) => count.includes(digit))
+  return rolling ? undefined : count
+}
+
 function readVideoRating(): VideoRating | null {
   const like = findRatingButton("like")
   const dislike = findRatingButton("dislike")
   if (!like && !dislike) return null
-  // 件数を非公開にした動画では数字の無い文言（または空）になるので、数字を含むときだけ件数とみなす
-  const likeCount = (like?.textContent ?? "").replace(/\s+/g, " ").trim()
+  const likeCount = readVideoLikeCount(like)
   return {
     liked: readLikedState(like),
     disliked: readLikedState(dislike),
-    ...(/\d/.test(likeCount) ? { likeCount } : {})
+    ...(likeCount === undefined ? {} : { likeCount })
   }
 }
 

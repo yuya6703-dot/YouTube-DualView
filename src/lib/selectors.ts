@@ -38,6 +38,11 @@ export const SELECTORS = {
       "ytd-watch-metadata #segmented-dislike-button button",
       "#top-level-buttons-computed dislike-button-view-model button"
     ],
+    // 高評価の件数が入る要素。ボタン全体ではなくここを読む（ボタンには件数以外も入る）。
+    likeCount: [
+      ".ytSpecButtonShapeNextButtonTextContent",
+      ".yt-spec-button-shape-next__button-text-content"
+    ],
     // チャンネル登録ボタンの入れ物。登録済みかどうかはこの要素の `subscribed` 属性で分かる。
     // ★ 2026-11-05 実DOMで確認: 未登録は属性なし・文言「チャンネル登録」、
     //   登録済みは `subscribed` が付き・文言「登録済み」＋通知ベルのボタンが現れる。
@@ -628,7 +633,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 80
+export const DIAGNOSE_VERSION = 81
 
 export type DiagnoseReport = {
   v: number
