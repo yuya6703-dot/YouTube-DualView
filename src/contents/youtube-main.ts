@@ -12,6 +12,8 @@ import {
   registerHandlers,
   type PlayerCommand,
   type FeedItem,
+  type GuideEntry,
+  type GuideState,
   type PageKind,
   type PageState,
   type PlayerStatus,
@@ -2772,6 +2774,173 @@ function seekAfterNavigation(videoId: string, seconds: number, generation: numbe
   window.setTimeout(trySeek, 150)
 }
 
+/* ============================================================
+ * サイドバー（YouTubeの呼称は guide）
+ *
+ * ★ watchページでは最初DOMに無い。ドロワーを**見えないように**一度開いて組み立てさせる。
+ *   見えなくするのは、関連動画やアイコンの遅延読み込みで使っている nudge と同じ手
+ *   （`opacity:0`）。IntersectionObserver は opacity を見ないので、透明のままでも
+ *   チャンネルのアイコンは読み込まれる（v77 の実測。2026-11-05 にサイドバーでも確認:
+ *   透明のまま30項目・アイコン7枚が揃い、画面には何も出なかった）。
+ *   スタイルの退避と復元は nudge と同じ snapshot 機構に乗せる（ドロワーは YouTube 自身が
+ *   inline style を持つため、単純な上書きでは原状へ戻せない）。
+ * ★ 一度組み立てれば閉じてもDOMに残り、SPA遷移をまたいで生きる。だから起動は1回でよい。
+ * ========================================================== */
+
+const GUIDE_DRAWER_OPEN_TIMEOUT_MS = 1500
+const GUIDE_ENTRIES_TIMEOUT_MS = 4000
+const GUIDE_AVATAR_TIMEOUT_MS = 2000
+/** 閉じるアニメーション（YouTube側のinline styleで200ms）が終わるまで透明のままにする */
+const GUIDE_CLOSE_SETTLE_MS = 300
+/** パスデータとして受け付ける文字。数値・空白・コマンド文字だけに限る */
+const SVG_PATH_DATA = /^[\d\s.,eE+\-aAcChHlLmMqQsStTvVzZ]+$/
+const SVG_PATH_MAX_LENGTH = 4000
+
+const delay = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms))
+
+/** 条件が満たされるまで待つ。満たされたら true、時間切れなら false */
+async function waitUntil(condition: () => boolean, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (condition()) return true
+    await delay(100)
+  }
+  return condition()
+}
+
+/** 組み立て済みのサイドバー。まだなら null */
+function readyGuideRoot(): HTMLElement | null {
+  const root = q<HTMLElement>(SELECTORS.guide.root)
+  return root && qa(SELECTORS.guide.entry, root).length > 0 ? root : null
+}
+
+const guideDrawerIsOpen = (drawer: HTMLElement) => drawer.hasAttribute("opened")
+
+let guideHydration: Promise<HTMLElement | null> | null = null
+
+/**
+ * サイドバーが使える状態になるまで面倒を見る。
+ * ★ 同時に2本走らせない。ドロワーの開閉はトグルなので、二重に押すと開けっ放しになる。
+ */
+function ensureGuide(): Promise<HTMLElement | null> {
+  const ready = readyGuideRoot()
+  if (ready) return Promise.resolve(ready)
+  guideHydration ??= hydrateGuide().finally(() => { guideHydration = null })
+  return guideHydration
+}
+
+async function hydrateGuide(): Promise<HTMLElement | null> {
+  const drawer = q<HTMLElement>(SELECTORS.guide.drawer)
+  const button = q<HTMLElement>(SELECTORS.guide.toggleButton)
+  // 利用者が自分で開いているときは触らない（勝手に閉じてしまわない）
+  if (!drawer || !button || guideDrawerIsOpen(drawer)) return readyGuideRoot()
+
+  const snapshot = acquireSnapshot(drawer)
+  forceProperty(snapshot, "opacity", "0")
+  forceProperty(snapshot, "pointer-events", "none")
+  try {
+    // ★ ページ読み込み直後はボタンの処理がまだ結び付いておらず、押しても開かない
+    //   （2026-11-05 実測: 読み込み中に押すと4秒待っても開かず、完了後は1回で開いた）。
+    //   開くまで数回押し直す。
+    let opened = false
+    for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+      button.click()
+      opened = await waitUntil(() => guideDrawerIsOpen(drawer), GUIDE_DRAWER_OPEN_TIMEOUT_MS)
+    }
+    if (!opened) return readyGuideRoot()
+    await waitUntil(() => readyGuideRoot() !== null, GUIDE_ENTRIES_TIMEOUT_MS)
+    // チャンネルのアイコンは項目より少し遅れて入る。1枚でも入れば残りも揃っている
+    await waitUntil(() => guideHasLoadedAvatar(), GUIDE_AVATAR_TIMEOUT_MS)
+  } finally {
+    if (guideDrawerIsOpen(drawer)) {
+      button.click()
+      await waitUntil(() => !guideDrawerIsOpen(drawer), GUIDE_DRAWER_OPEN_TIMEOUT_MS)
+      await delay(GUIDE_CLOSE_SETTLE_MS)
+    }
+    restoreSnapshot(snapshot)
+  }
+  return readyGuideRoot()
+}
+
+function guideHasLoadedAvatar(): boolean {
+  const root = q<HTMLElement>(SELECTORS.guide.root)
+  return root !== null && qa<HTMLImageElement>(SELECTORS.guide.entryAvatar, root)
+    .some((img) => guideAvatarUrl(img) !== "")
+}
+
+const guideAvatarUrl = (img: HTMLImageElement | null): string => {
+  const src = img?.getAttribute("src") ?? ""
+  return /^https?:\/\//.test(src) ? src : ""
+}
+
+/**
+ * アイコンのSVGから `d` の値だけを取り出す。
+ * ★ HTMLは持ち込まない（D-15）。受け取り側は自前の `<svg>` の属性として渡すだけなので、
+ *   パスデータとして妥当な文字しか通さなければ、描画以外のことは起こせない。
+ */
+function readGuideIconPath(entry: Element): string {
+  const d = q<SVGPathElement>(SELECTORS.guide.entryIconPath, entry)?.getAttribute("d") ?? ""
+  return d.length > 0 && d.length <= SVG_PATH_MAX_LENGTH && SVG_PATH_DATA.test(d) ? d : ""
+}
+
+/**
+ * 今のメイン画面で**見えていない**項目か。
+ * 「もっと見る / 折りたたむ」の入れ物は、開閉状態（`expanded`属性）によって
+ * 中身・展開ボタン・折りたたみボタンのどれを見せるかが変わる。サブ画面も同じものだけ出す。
+ */
+function guideEntryIsHidden(entry: HTMLElement): boolean {
+  const collapsible = entry.closest(SELECTORS.guide.collapsible.join(","))
+  if (!collapsible) return false
+  const expanded = collapsible.hasAttribute("expanded")
+  if (entry.id === "expander-item") return expanded
+  if (entry.id === "collapser-item") return !expanded
+  return !expanded
+}
+
+function readGuideEntry(entry: HTMLElement, id: string): GuideEntry | null {
+  const title = text(SELECTORS.guide.entryTitle, entry)
+  if (!title) return null
+  return {
+    id,
+    title,
+    href: q<HTMLElement>(SELECTORS.guide.entryLink, entry)?.getAttribute("href") ?? "",
+    avatarUrl: guideAvatarUrl(q<HTMLImageElement>(SELECTORS.guide.entryAvatar, entry)),
+    iconPath: readGuideIconPath(entry)
+  }
+}
+
+function readGuide(): GuideState {
+  const root = readyGuideRoot()
+  if (!root) return { available: false, sections: [] }
+  const sections = qa(SELECTORS.guide.section, root).map((section, s) => ({
+    title: text(SELECTORS.guide.sectionTitle, section),
+    entries: qa<HTMLElement>(SELECTORS.guide.entry, section)
+      // ★ idは「何番目か」。読んだ直後は必ず一致し、ズレたときは href / title で引き直す
+      .map((entry, e) => (guideEntryIsHidden(entry) ? null : readGuideEntry(entry, `s${s}:e${e}`)))
+      .filter((entry): entry is GuideEntry => entry !== null)
+  }))
+  return { available: true, sections: sections.filter((section) => section.entries.length > 0) }
+}
+
+/** サブ画面が押した項目を、今のDOMから見つけ直す */
+function findGuideEntryElement(request: { id: string; title: string; href: string }): HTMLElement | null {
+  const root = readyGuideRoot()
+  if (!root) return null
+  const matches = (entry: HTMLElement) => {
+    const href = q<HTMLElement>(SELECTORS.guide.entryLink, entry)?.getAttribute("href") ?? ""
+    // href がある項目は href が本体。無い項目（「ショート」「もっと見る」等）だけ表示名で見る
+    return request.href ? href === request.href : href === "" && text(SELECTORS.guide.entryTitle, entry) === request.title
+  }
+  const sections = qa(SELECTORS.guide.section, root)
+  const position = /^s(\d+):e(\d+)$/.exec(request.id)
+  if (position) {
+    const section = sections[Number(position[1])]
+    const candidate = section && qa<HTMLElement>(SELECTORS.guide.entry, section)[Number(position[2])]
+    if (candidate && matches(candidate)) return candidate
+  }
+  return sections.flatMap((section) => qa<HTMLElement>(SELECTORS.guide.entry, section)).find(matches) ?? null
+}
+
 registerHandlers({
   PLAYER_GET_STATUS: () => buildStatus(),
   // 本線はPort経由の StreamCommand "COMMAND"。こちらはPortが切れている間でも
@@ -2904,6 +3073,22 @@ registerHandlers({
     // 一時停止中は STATUS が流れないため、ここで送ってサブ画面の表示を実態へ合わせる
     pushStatus()
     return { rating: readVideoRating(), applied }
+  },
+  DOM_FETCH_GUIDE: async () => {
+    await ensureGuide()
+    return readGuide()
+  },
+  GUIDE_ACTIVATE: async (request) => {
+    // ★ メイン画面が読み込み直されるとサイドバーはDOMごと消える。サブ画面は前の内容を
+    //   持ったままなので、押された時点でもう一度組み立ててから同じ項目を探す。
+    await ensureGuide()
+    const entry = findGuideEntryElement(request)
+    if (!entry) return { ok: false, guide: readGuide() }
+    // ★ URLは組み立てない。YouTube自身の項目を押して、YouTubeに遷移させる。
+    //   「もっと見る」のように遷移しない項目もあるので、押した後の一覧を読み直して返す。
+    ;(q<HTMLElement>(SELECTORS.guide.entryLink, entry) ?? entry).click()
+    await delay(400)
+    return { ok: true, guide: readGuide() }
   },
   CHANNEL_SUBSCRIBE: async () => {
     const videoId = getVideoId()

@@ -56,7 +56,7 @@ function load(relative, extra = "") {
 }
 const { DEFAULT_SETTINGS } = load("src/lib/messaging.ts")
 const { getDictionary } = load("src/lib/i18n.ts")
-const { testing } = load("src/tabs/popout.tsx", "\nexport const testing = { CommentRow, RelatedRow, PagingTail, VideoActions }\n")
+const { testing } = load("src/tabs/popout.tsx", "\nexport const testing = { CommentRow, RelatedRow, PagingTail, VideoActions, GuidePanel }\n")
 
 const comment = (id, replyCount) => ({
   id, author: `Author ${id}`, avatarUrl: "", text: `Comment ${id}`,
@@ -342,4 +342,71 @@ test("split view and fullscreen comments show the title above one row of actions
   assert.ok(row.contains(button("高く評価")), "the rating buttons sit on the channel's row")
   assert.ok(row.contains(button("共有")), "and so does share")
   assert.ok(!row.contains(container.querySelector("p")), "the title is not in that row any more")
+})
+
+/* ---- サイドバー（メイン画面のものをそのまま並べる） ---- */
+
+const GUIDE_HOME_PATH = "m11.485 2.143-8 4.8-2 1.2a1 1 0 001.03 1.714L3 9.567V20Z"
+const guideState = {
+  available: true,
+  sections: [
+    {
+      title: "",
+      entries: [
+        { id: "s0:e0", title: "ホーム", href: "/", avatarUrl: "", iconPath: GUIDE_HOME_PATH },
+        { id: "s0:e1", title: "ショート", href: "", avatarUrl: "", iconPath: "" }
+      ]
+    },
+    {
+      title: "探索",
+      entries: [
+        { id: "s1:e0", title: "すみれのBGM", href: "/@sumire", avatarUrl: "https://yt3.ggpht.com/a.jpg", iconPath: "" }
+      ]
+    }
+  ]
+}
+
+async function renderGuide(t, props = {}) {
+  const container = document.body.appendChild(document.createElement("div"))
+  const root = createRoot(container)
+  t.after(async () => { await act(async () => root.unmount()); container.remove() })
+  const activated = []
+  await act(async () => {
+    root.render(React.createElement(testing.GuidePanel, {
+      guide: guideState, loading: false, error: null, disabled: false,
+      onActivate: (entry) => activated.push(entry), onRefresh: () => {}, t: getDictionary("ja"),
+      ...props
+    }))
+  })
+  const row = (title) => [...container.querySelectorAll("button")].find((b) => b.textContent.trim() === title)
+  return { container, activated, row, text: () => container.textContent }
+}
+
+test("the sub window's sidebar shows the main window's own entries, icons and channel pictures", async (t) => {
+  const { container, row, text } = await renderGuide(t)
+
+  assert.ok(row("ホーム") && row("ショート") && row("すみれのBGM"), "項目がそのまま並ぶ")
+  assert.match(text(), /探索/, "見出しもYouTubeの文言のまま出す")
+  assert.equal(container.querySelector("svg path").getAttribute("d"), GUIDE_HOME_PATH,
+    "アイコンはYouTubeのパスデータを自前のsvgに渡して描く")
+  const avatar = container.querySelector("img")
+  assert.equal(avatar.getAttribute("src"), "https://yt3.ggpht.com/a.jpg")
+  assert.equal(avatar.getAttribute("referrerpolicy"), "no-referrer")
+  assert.ok(!container.querySelector("a"), "サブ画面側にリンクは作らない（遷移はメイン画面に任せる）")
+})
+
+test("pressing a sidebar entry hands the whole entry back so the main window can find it again", async (t) => {
+  const { row, activated } = await renderGuide(t)
+
+  await act(async () => {
+    row("ショート").dispatchEvent(new MouseEvent("click", { bubbles: true }))
+  })
+
+  assert.deepEqual(activated, [{ id: "s0:e1", title: "ショート", href: "", avatarUrl: "", iconPath: "" }],
+    "hrefが無い項目でも、位置と表示名で引き直せるよう丸ごと渡す")
+})
+
+test("a sidebar that could not be read says so instead of showing nothing", async (t) => {
+  const { text } = await renderGuide(t, { guide: { available: false, sections: [] } })
+  assert.match(text(), /サイドバーを取得できませんでした/)
 })

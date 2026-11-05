@@ -279,6 +279,36 @@ export const SELECTORS = {
     replyCommentBox: ["ytd-commentbox[is-reply]"]
   },
 
+  /**
+   * 左のサイドバー（YouTubeの呼称は guide）。サブ画面に同じものを並べるために読む。
+   *
+   * ★ 2026-11-05 実測（watchページ）: `ytd-guide-renderer` は**最初はDOMに存在しない**。
+   *   ハンバーガー（`#guide-button`）を一度押してドロワーを開いて初めて組み立てられ、
+   *   以後は閉じてもDOMに残り、SPA遷移をまたいで生き続ける。だから起動は1ページにつき1回でよい。
+   *   初回は renderer が約650ms、全30項目が約750ms、チャンネルのアイコンが約960msで揃った。
+   *   ページ読み込み直後はボタンの処理がまだ結び付いておらず、押しても開かないことがある。
+   * ★ 項目のアイコンは `<svg viewBox="0 0 24 24">` の中に `<path d>` が1本だけ。
+   *   チャンネルの項目はアイコンを持たず `yt-img-shadow img#img` にアイコン画像が入る。
+   *   どちらも持たない項目（「ショート」等）があるので、両方とも無いことを異常としない。
+   */
+  guide: {
+    root: ["ytd-guide-renderer"],
+    drawer: ["tp-yt-app-drawer#guide"],
+    toggleButton: ["#guide-button button", "#guide-button"],
+    section: ["ytd-guide-section-renderer"],
+    sectionTitle: ["#guide-section-title"],
+    entry: ["ytd-guide-entry-renderer"],
+    // ★ 「ショート」の項目は href を持たない（Polymer側のハンドラだけで遷移する）。
+    //   だからサブ画面からの遷移はURLを組み立てず、この要素を押して YouTube 自身に遷移させる。
+    entryLink: ["a#endpoint", "a"],
+    entryTitle: [".title", "yt-formatted-string.title"],
+    entryIconPath: [".guide-icon svg path", "yt-icon svg path"],
+    entryAvatar: ["yt-img-shadow img#img", "img#img"],
+    // 「もっと見る / 折りたたむ」の入れ物。`expanded` 属性が開閉の状態を持ち、
+    // 隠れているチャンネルは展開するまでDOMに存在しない（2026-11-05 実測: 7件 → 103件）。
+    collapsible: ["ytd-guide-collapsible-entry-renderer"]
+  },
+
   // ライブチャットは現在の対象外。将来再開する場合の診断候補として残す
   liveChat: {
     frame: ["iframe#chatframe", "iframe.ytd-live-chat-frame"],
@@ -644,7 +674,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 83
+export const DIAGNOSE_VERSION = 84
 
 export type DiagnoseReport = {
   v: number

@@ -12,7 +12,7 @@
  *   B 通常のページ                  … 従来どおりコメントがサブ画面へ流れる
  *   C 前の動画のDOMが残っている     … 従来どおりパネル経由で読み込みを起動する（2026-09-17の契約）
  *   D 動画の評価（v75）             … プレイヤー内のボタンではなく ytd-watch-metadata 側から読む
- *   E サブ画面（v78/v80）           … ビルド済みの popout を起動し、開いた時点の表示・共有・チャンネル登録を見る
+ *   E サブ画面（v78/v80/v84）       … ビルド済みの popout を起動し、開いた時点の表示・共有・チャンネル登録・サイドバーを見る
  *
  * ★ E を入れるまで、配布物の確認は content script だけだった。サブ画面側の変更
  *   （v76 の共有、v78 の分割・共有）は毎回その場限りのスクリプトで確かめており、
@@ -186,6 +186,18 @@ async function subWindow() {
   const popoutFile = /<script src="\/(tabs\/popout\.[^"]+\.js)"/.exec(popoutHtml)[1]
   const copied = []
   const resetTimers = new Map()
+  const toMainWindow = []
+  // メイン画面のサイドバー。中身の作り方は comments-loading.test.cjs の検査と同じ形
+  const smokeGuide = {
+    available: true,
+    sections: [{
+      title: "探索",
+      entries: [
+        { id: "s0:e0", title: "ホーム", href: "/", avatarUrl: "", iconPath: "M12 4 3 12h2v8h5v-6h4v6h5v-8h2z" },
+        { id: "s0:e1", title: "ショート", href: "", avatarUrl: "", iconPath: "" }
+      ]
+    }]
+  }
   let toSubWindow = null
   const noop = () => {}
   const dom = new JSDOM(popoutHtml.replace(/<script[^>]*><\/script>/, ""), {
@@ -225,7 +237,12 @@ async function subWindow() {
             onDisconnect: { addListener: noop, removeListener: noop },
             postMessage: noop, disconnect: noop
           }),
-          sendMessage: async () => ({ ok: true, data: {} }),
+          sendMessage: async (_tabId, env) => {
+            toMainWindow.push(env)
+            if (env.action === "DOM_FETCH_GUIDE") return { ok: true, data: smokeGuide }
+            if (env.action === "GUIDE_ACTIVATE") return { ok: true, data: { ok: true, guide: smokeGuide } }
+            return { ok: true, data: {} }
+          },
           create: async () => ({})
         }
       }
@@ -297,8 +314,31 @@ async function subWindow() {
   assert.ok(doc.body.textContent.includes("コピーしました"),
     "E: 連続でコピーしても、前回のタイマーに表示を消されない")
 
+  // メイン画面のサイドバーをそのまま並べる（2026-11-05 の要望）。既定は閉じている
+  assert.ok(!doc.body.textContent.includes("ホーム"), "E: サイドバーは既定で出さない")
+  const sidebarToggle = button("サイドバーを表示")
+  assert.ok(sidebarToggle, "E: サイドバーの開閉はヘッダーの左端にある")
+  sidebarToggle.dispatchEvent(new win.MouseEvent("click", { bubbles: true }))
+  await wait(400)
+  assert.ok(toMainWindow.some((env) => env.action === "DOM_FETCH_GUIDE"), "E: 開いたときに取りに行く")
+  const sidebar = doc.querySelector("aside")
+  assert.ok(sidebar, "E: サイドバーが出る")
+  assert.ok(sidebar.textContent.includes("ホーム") && sidebar.textContent.includes("探索"),
+    "E: メイン画面の項目と見出しがそのまま並ぶ")
+  assert.ok(sidebar.querySelector("svg path"), "E: YouTubeのアイコンのパスデータで描く")
+  assert.ok(!sidebar.querySelector("a"), "E: サブ画面側にリンクは作らない")
+  const homeRow = [...sidebar.querySelectorAll("button")].find((b) => b.textContent.trim() === "ホーム")
+  homeRow.dispatchEvent(new win.MouseEvent("click", { bubbles: true }))
+  await wait(300)
+  const activate = toMainWindow.find((env) => env.action === "GUIDE_ACTIVATE")
+  // JSON を挟むのは、サブ画面側のオブジェクトが jsdom のレルムで作られていて
+  // deepEqual が「中身は同じだが別の Object」として落ちるため
+  assert.deepEqual(JSON.parse(JSON.stringify(activate?.payload ?? null)),
+    { id: "s0:e0", title: "ホーム", href: "/" },
+    "E: 押すとメイン画面の同じ項目を押させる")
+
   console.log("E サブ画面               →", JSON.stringify(panes.map((p) => p.querySelector("p")?.textContent.trim())),
-    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持 / チャンネル名と登録ボタン: あり")
+    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持 / チャンネル名と登録ボタン: あり / サイドバー: 再現")
   win.close()
 }
 

@@ -872,3 +872,237 @@ test("a rating changed on the main window while paused reaches the sub window wi
   await h.advance(3000)
   assert.deepEqual(ratings(), [false, true], "nothing more is sent while the rating stays the same")
 })
+
+
+/* ---- サイドバー（YouTubeの呼称は guide） ---------------------------------
+ * 2026-11-05 実機で確かめた形に合わせたつくりもの:
+ *   - watch ページには最初 ytd-guide-renderer が無く、ドロワーを開いて初めて組み立てられる
+ *   - 組み立ては押してから約650ms
+ *   - 「ショート」は href を持たない
+ *   - 「もっと見る」で隠れているチャンネルは、展開するまでDOMに存在しない
+ * ------------------------------------------------------------------------ */
+
+const HOME_PATH = "m11.485 2.143-8 4.8-2 1.2a1 1 0 001.03 1.714L3 9.567V20Z"
+const CHEVRON_PATH = "M12 15.4 6.6 10l1.4-1.4 4 4 4-4 1.4 1.4Z"
+
+const guideEntry = (title, { href, icon, avatar, id } = {}) => `
+  <ytd-guide-entry-renderer${id ? ` id="${id}"` : ""}>
+    <a id="endpoint"${href ? ` href="${href}"` : ""}>
+      <tp-yt-paper-item>
+        <yt-icon class="guide-icon">${icon ? `<svg viewBox="0 0 24 24"><path d="${icon}"></path></svg>` : ""}</yt-icon>
+        <yt-img-shadow><img id="img"${avatar ? ` src="${avatar}"` : ""}></yt-img-shadow>
+        <yt-formatted-string class="title">${title}</yt-formatted-string>
+      </tp-yt-paper-item>
+    </a>
+  </ytd-guide-entry-renderer>`
+
+const guideMarkup = () => `
+  <ytd-guide-renderer>
+    <ytd-guide-section-renderer><h3></h3><div id="items">
+      ${guideEntry("ホーム", { href: "/", icon: HOME_PATH })}
+      ${guideEntry("ショート", { icon: CHEVRON_PATH })}
+    </div></ytd-guide-section-renderer>
+    <ytd-guide-section-renderer><h3></h3><div id="items">
+      ${guideEntry("登録チャンネル", { href: "/feed/subscriptions", icon: CHEVRON_PATH })}
+      ${guideEntry("すみれのBGM", { href: "/@sumire", avatar: "https://yt3.ggpht.com/a.jpg" })}
+      <ytd-guide-collapsible-entry-renderer>
+        ${guideEntry("もっと見る", { id: "expander-item", icon: CHEVRON_PATH })}
+        <div id="expanded">
+          <div id="expandable-items"></div>
+          ${guideEntry("折りたたむ", { id: "collapser-item", icon: CHEVRON_PATH })}
+        </div>
+      </ytd-guide-collapsible-entry-renderer>
+    </div></ytd-guide-section-renderer>
+    <ytd-guide-section-renderer><h3 id="guide-section-title">探索</h3><div id="items">
+      ${guideEntry("音楽", { href: "/channel/UC-9", icon: CHEVRON_PATH })}
+    </div></ytd-guide-section-renderer>
+  </ytd-guide-renderer>`
+
+const DRAWER_STYLE = "transition-duration: 200ms; touch-action: pan-y;"
+const guideShell = (opened = "", content = "") => `
+  <div id="guide-button"><button></button></div>
+  <tp-yt-app-drawer id="guide" style="${DRAWER_STYLE}"${opened}>
+    <div id="scrim"></div><div id="contentContainer">${content}</div>
+  </tp-yt-app-drawer>`
+
+/** メイン画面のYouTubeの振る舞い。開閉と、初回に開いたときの組み立てを再現する */
+function youtubeBuildsGuideOnOpen(h) {
+  const drawer = h.doc.querySelector("tp-yt-app-drawer#guide")
+  const button = h.doc.querySelector("#guide-button button")
+  const openedWith = []
+  button.addEventListener("click", () => {
+    if (drawer.hasAttribute("opened")) { drawer.removeAttribute("opened"); return }
+    drawer.setAttribute("opened", "")
+    openedWith.push(drawer.getAttribute("style")) // 開いた瞬間、画面にどう見えていたか
+    h.win.setTimeout(() => {
+      if (!h.doc.querySelector("ytd-guide-renderer")) {
+        drawer.querySelector("#contentContainer").innerHTML = guideMarkup()
+      }
+    }, 650)
+  })
+  return { drawer, button, openedWith }
+}
+
+/** 「もっと見る」を押したときの展開。隠れていたチャンネルはここで初めてDOMへ入る */
+function youtubeExpandsOnClick(h) {
+  const collapsible = h.doc.querySelector("ytd-guide-collapsible-entry-renderer")
+  collapsible.querySelector("#expander-item a").addEventListener("click", () => {
+    collapsible.setAttribute("expanded", "")
+    collapsible.querySelector("#expandable-items").innerHTML =
+      guideEntry("うしし", { href: "/@usiusisi", avatar: "https://yt3.ggpht.com/b.jpg" })
+  })
+}
+
+/**
+ * 押された項目を記録する。★ あわせて既定の遷移を止める。本物のYouTubeはSPAとして自前で
+ * 遷移するが、jsdom は <a href> の既定動作を「未実装の画面遷移」として扱い、後から
+ * 実タイマーで例外を投げて実行を止めてしまう（このファイルは偽のタイマーで時間を進めている）。
+ */
+const guideClickLog = (h) => {
+  const clicks = []
+  h.doc.addEventListener("click", (event) => {
+    const entry = event.target.closest?.("ytd-guide-entry-renderer")
+    if (entry) clicks.push(entry.textContent.trim())
+    event.preventDefault()
+  })
+  return clicks
+}
+
+/**
+ * 偽の時間を少しずつ進めながら、処理が終わるのを待つ。
+ * ★ 一度に大きく進めても終わらない。advance() は1回の待ちにつきマイクロタスクを1周しか
+ *   回さないため、await が何段も続く処理（サイドバーの組み立て）は途中で取り残され、
+ *   次に advance() を呼ぶまで先へ進まない。
+ */
+async function settle(h, promise, slices = 20, ms = 500) {
+  let result
+  let done = false
+  promise.then((value) => { result = value; done = true })
+  for (let i = 0; i < slices && !done; i++) await h.advance(ms)
+  assert.ok(done, "処理が終わらなかった")
+  return result
+}
+
+const fetchGuide = (h) => settle(h, h.handlers.DOM_FETCH_GUIDE())
+const activate = (h, entry) =>
+  settle(h, h.handlers.GUIDE_ACTIVATE({ id: entry.id, title: entry.title, href: entry.href }))
+const titlesOf = (guide) =>
+  // plain() を通すのは、Content Script 側の配列が jsdom のレルムで作られていて
+  // deepEqual が「中身は同じだが別の Array」として落ちるため（このファイルの他の検査と同じ理由）
+  plain(guide.sections.map((section) => section.entries.map((entry) => entry.title)))
+
+test("the sidebar is built by opening the main window's drawer out of sight, then put back as it was", async (t) => {
+  const h = setup(t, guideShell())
+  const youtube = youtubeBuildsGuideOnOpen(h)
+  assert.ok(!h.doc.querySelector("ytd-guide-renderer"), "watchページには最初サイドバーが無い")
+
+  const guide = await fetchGuide(h)
+
+  assert.equal(youtube.openedWith.length, 1, "ドロワーは1回だけ開く")
+  assert.match(youtube.openedWith[0], /opacity: 0/, "開いている間は透明にする")
+  assert.match(youtube.openedWith[0], /pointer-events: none/, "開いている間は操作も受けない")
+  assert.equal(youtube.drawer.hasAttribute("opened"), false, "読み終えたら閉じる")
+  assert.equal(youtube.drawer.style.opacity, "", "こちらで当てた透明化は残さない")
+  assert.equal(youtube.drawer.style.getPropertyValue("pointer-events"), "")
+  // YouTube自身が持っている inline style は壊さない（ドロワーは transition-duration を持つ）。
+  // touch-action は jsdom が実装していないプロパティなので、ここでは見られない。
+  assert.equal(youtube.drawer.style.getPropertyValue("transition-duration"), "200ms")
+
+  assert.equal(guide.available, true)
+  assert.deepEqual(titlesOf(guide), [
+    ["ホーム", "ショート"],
+    ["登録チャンネル", "すみれのBGM", "もっと見る"], // 「折りたたむ」は畳んでいる間は出さない
+    ["音楽"]
+  ])
+  assert.deepEqual(plain(guide.sections.map((section) => section.title)), ["", "", "探索"])
+  const home = guide.sections[0].entries[0]
+  assert.deepEqual(
+    { href: home.href, iconPath: home.iconPath, avatarUrl: home.avatarUrl },
+    { href: "/", iconPath: HOME_PATH, avatarUrl: "" }
+  )
+  const channel = guide.sections[1].entries[1]
+  assert.deepEqual(
+    { href: channel.href, iconPath: channel.iconPath, avatarUrl: channel.avatarUrl },
+    { href: "/@sumire", iconPath: "", avatarUrl: "https://yt3.ggpht.com/a.jpg" }
+  )
+})
+
+test("a drawer the user opened themselves is read without touching it", async (t) => {
+  const h = setup(t, guideShell(" opened", guideMarkup()))
+  const youtube = youtubeBuildsGuideOnOpen(h)
+
+  const guide = await fetchGuide(h)
+
+  assert.deepEqual(youtube.openedWith, [], "開いているものを押し直さない（押すと閉じてしまう）")
+  assert.equal(youtube.drawer.hasAttribute("opened"), true, "利用者が開いたものは開いたまま")
+  assert.equal(youtube.drawer.getAttribute("style"), DRAWER_STYLE, "スタイルにも触れない")
+  assert.equal(titlesOf(guide)[0][0], "ホーム")
+})
+
+test("a sidebar entry is pressed on the main window instead of being turned into a URL", async (t) => {
+  const h = setup(t, guideShell(" opened", guideMarkup()))
+  const guide = await fetchGuide(h)
+  const clicks = guideClickLog(h)
+  const shorts = guide.sections[0].entries[1]
+  assert.deepEqual({ title: shorts.title, href: shorts.href }, { title: "ショート", href: "" },
+    "hrefを持たない項目がある。URLを組み立てる方式では押せない")
+
+  assert.equal((await activate(h, shorts)).ok, true)
+
+  assert.deepEqual(clicks, ["ショート"], "メイン画面の同じ項目を1回だけ押す")
+  assert.equal(h.win.location.pathname, "/watch", "こちらでURLを組み立てて飛ばしたりしない")
+})
+
+test("an entry is found again by its link when the main window's list has shifted", async (t) => {
+  const h = setup(t, guideShell(" opened", guideMarkup()))
+  const guide = await fetchGuide(h)
+  const home = guide.sections[0].entries[0]
+
+  // 読んだ後にYouTube側が項目を増やし、位置がずれた状態にする
+  h.doc.querySelector("ytd-guide-section-renderer #items")
+    .insertAdjacentHTML("afterbegin", guideEntry("新着", { href: "/feed/new", icon: CHEVRON_PATH }))
+  const clicks = guideClickLog(h)
+
+  assert.equal((await activate(h, home)).ok, true)
+
+  assert.deepEqual(clicks, ["ホーム"], "位置ではなくリンク先で引き直す")
+})
+
+test("an entry remembered from before a reload rebuilds the sidebar before pressing it", async (t) => {
+  const h = setup(t, guideShell()) // 読み込み直後のメイン画面。サイドバーはまだDOMに無い
+  const youtube = youtubeBuildsGuideOnOpen(h)
+  const clicks = guideClickLog(h)
+
+  // サブ画面は前のページで読んだ内容をそのまま持っている
+  const result = await activate(h, { id: "s0:e0", title: "ホーム", href: "/" })
+
+  assert.equal(result.ok, true)
+  assert.equal(youtube.openedWith.length, 1, "組み立て直してから押す")
+  assert.deepEqual(clicks, ["ホーム"])
+})
+
+test("channels hidden behind the main window's 'show more' arrive only once it is expanded", async (t) => {
+  const h = setup(t, guideShell(" opened", guideMarkup()))
+  youtubeExpandsOnClick(h)
+  const guide = await fetchGuide(h)
+  const expander = guide.sections[1].entries.at(-1)
+  assert.equal(expander.title, "もっと見る")
+
+  const expanded = (await activate(h, expander)).guide
+
+  assert.deepEqual(titlesOf(expanded)[1], ["登録チャンネル", "すみれのBGM", "うしし", "折りたたむ"],
+    "展開後は隠れていたチャンネルと「折りたたむ」に入れ替わる")
+})
+
+test("an icon is carried over only when it really is path data", async (t) => {
+  const h = setup(t, guideShell(" opened", `
+    <ytd-guide-renderer><ytd-guide-section-renderer><h3></h3><div id="items">
+      ${guideEntry("正しい", { href: "/ok", icon: HOME_PATH })}
+      ${guideEntry("細工", { href: "/ng", icon: "url(javascript:alert(1))" })}
+    </div></ytd-guide-section-renderer></ytd-guide-renderer>`))
+
+  const guide = await fetchGuide(h)
+
+  assert.deepEqual(plain(guide.sections[0].entries.map((entry) => entry.iconPath)), [HOME_PATH, ""],
+    "パスデータとして妥当な文字以外は持ち出さない")
+})

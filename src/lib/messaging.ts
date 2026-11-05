@@ -115,6 +115,36 @@ export interface ChannelState {
   subscribed: boolean
 }
 
+/**
+ * メイン画面のサイドバー（YouTubeの呼称は guide）の1項目。
+ *
+ * ★ URLは組み立てない。遷移はメイン画面の同じ項目をクリックして YouTube 自身にさせる
+ *   （「ショート」のように href を持たない項目があり、URL方式では再現できないため）。
+ *   `href` は同じ項目を見つけ直すための目印として持つ。表示には使わない。
+ * ★ `iconPath` は YouTube のアイコン `<svg>` の中にある `<path d>` の値だけ。
+ *   HTMLは持ち込まない（D-15と同じ理由）。受け取り側は自前の `<svg>` に `d` として渡す。
+ */
+export interface GuideEntry {
+  id: string          // 位置ベースの目印 "s1:e4"。ズレたときは href / title で引き直す
+  title: string       // YouTubeの表示文言のまま
+  href: string        // 空のことがある（「ショート」「もっと見る」等）
+  avatarUrl: string   // チャンネルの項目だけ。読み込み前は空
+  iconPath: string    // SVGのパスデータ。取れなければ空
+}
+
+export interface GuideSection {
+  title: string       // 見出しの無い区切りもある（空文字）
+  entries: GuideEntry[]
+}
+
+/** available=false はサイドバーをまだ組み立てられていない（メイン画面側の事情） */
+export interface GuideState {
+  available: boolean
+  sections: GuideSection[]
+}
+
+export const EMPTY_GUIDE: GuideState = { available: false, sections: [] }
+
 export interface PlayerStatus {
   videoId: string | null
   title: string
@@ -188,6 +218,15 @@ export type Contract = {
   // チャンネル登録。★解除は扱わない。登録済みのボタンを押すと YouTube は「登録を解除」を含む
   // メニューを開くため、サブ画面からの要求では登録済みのボタンを絶対に押さない。
   CHANNEL_SUBSCRIBE: { req: void; res: { channel: ChannelState | null; applied: boolean } }
+  // サイドバーの中身を読む。まだ組み立てられていなければ、メイン画面のドロワーを
+  // 見えないように一度だけ開いて組み立てさせる（時間がかかるので非同期）。
+  DOM_FETCH_GUIDE: { req: void; res: GuideState }
+  // サイドバーの項目を押す。遷移も「もっと見る」の展開も YouTube 自身にさせるので、
+  // 押した後の一覧を読み直して一緒に返す（サブ画面はそれで描き直す）。
+  GUIDE_ACTIVATE: {
+    req: { id: string; title: string; href: string }
+    res: { ok: boolean; guide: GuideState }
+  }
   DIAGNOSE_SELECTORS: { req: void;                    res: DiagnoseReport }
 
   /* --- 受け手: Service Worker --- */
@@ -298,7 +337,9 @@ export const LOCAL_KEYS = {
   commentFontSize: "commentFontSize", // コメント欄の文字サイズ設定（Popout単独の見た目設定）
   relatedDisplaySize: "relatedDisplaySize", // 関連動画カード（サムネ・文字・行間）の表示サイズ
   splitHorizontal: "splitHorizontal", // 分割ビューを左右(true)にするか上下(false)にするか
-  splitRatio: "splitRatio"            // 分割ビューの片側の割合（0.2〜0.8）
+  splitRatio: "splitRatio",           // 分割ビューの片側の割合（0.2〜0.8）
+  guideOpen: "guideOpen"              // サブ画面のサイドバーを開いているか
+
 } as const
 
 /* ============================================================

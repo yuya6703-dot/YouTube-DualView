@@ -68,6 +68,14 @@ export interface Dictionary {
   playbackSpeed: string
   refresh: string
 
+  // サイドバー（メイン画面のものをそのまま並べる）
+  sidebar: string
+  showSidebar: string
+  hideSidebar: string
+  sidebarLoading: string
+  sidebarUnavailable: string
+  errSidebarEntryGone: string
+
   // 動画の評価・共有
   ratingGroupLabel: string
   likeVideo: string
@@ -238,6 +246,13 @@ const ja: Dictionary = {
   playbackSpeed: "再生速度",
   refresh: "更新する",
 
+  sidebar: "サイドバー",
+  showSidebar: "サイドバーを表示",
+  hideSidebar: "サイドバーを隠す",
+  sidebarLoading: "サイドバーを読み込んでいます…",
+  sidebarUnavailable: "サイドバーを取得できませんでした。メイン画面で一度開いてから、もう一度お試しください。",
+  errSidebarEntryGone: "この項目はメイン画面に見つかりませんでした",
+
   ratingGroupLabel: "動画の評価",
   likeVideo: "高く評価",
   unlikeVideo: "高評価を取り消す",
@@ -398,6 +413,13 @@ const en: Dictionary = {
   mute: "Mute",
   playbackSpeed: "Speed",
   refresh: "Refresh",
+
+  sidebar: "Sidebar",
+  showSidebar: "Show sidebar",
+  hideSidebar: "Hide sidebar",
+  sidebarLoading: "Loading the sidebar…",
+  sidebarUnavailable: "Couldn't read the sidebar. Open it once on the main window and try again.",
+  errSidebarEntryGone: "That entry is no longer on the main window",
 
   ratingGroupLabel: "Rate this video",
   likeVideo: "I like this",

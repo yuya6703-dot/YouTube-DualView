@@ -21,17 +21,20 @@ import {
   verticalListSortingStrategy
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Check, ChevronDown, ChevronUp, ClipboardCopy, Columns2, CornerDownRight, Expand, Eye, GripVertical, ListPlus, ListVideo, Loader2, Maximize2, MessageSquare, Minimize2, Pause, Pin, Play, Plus, RefreshCw, RotateCcw, RotateCw, Rows2, Search, Share2, Shrink, Stethoscope, StickyNote, ThumbsDown, ThumbsUp, Trash2, Volume2, VolumeX, X } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, ClipboardCopy, Columns2, CornerDownRight, Expand, Eye, GripVertical, ListPlus, ListVideo, Loader2, Maximize2, Menu, MessageSquare, Minimize2, Pause, Pin, Play, Plus, RefreshCw, RotateCcw, RotateCw, Rows2, Search, Share2, Shrink, Stethoscope, StickyNote, ThumbsDown, ThumbsUp, Trash2, Volume2, VolumeX, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   DEFAULT_RELATED_DISPLAY_SIZE,
   DEFAULT_SETTINGS,
+  EMPTY_GUIDE,
   LOCAL_KEYS,
   askContent,
   isRelatedDisplaySize,
   isErr,
   type DiagnoseReport,
   type FeedItem,
+  type GuideEntry,
+  type GuideState,
   type PageState,
   type QueueItem,
   type RelatedDisplaySize,
@@ -267,6 +270,13 @@ export default function Popout() {
       // ユーザー操作起点でないと拒否されることがある。失敗しても表示は壊さない
     }
   }
+  // メイン画面のサイドバー。開いている間だけ取りに行く（取得はメイン画面のDOMを
+  // 一度起動させる重い操作なので、使わない人には一切走らせない）
+  const [guideOpen, setGuideOpen] = useState(false)
+  const [guide, setGuide] = useState<GuideState | null>(null)
+  const [guideLoading, setGuideLoading] = useState(false)
+  const [guideError, setGuideError] = useState<string | null>(null)
+
   const [commentFontSize, setCommentFontSize] = useState<CommentFontSize>("sm")
   const [relatedDisplaySize, setRelatedDisplaySize] = useState<RelatedDisplaySize>(
     DEFAULT_RELATED_DISPLAY_SIZE
@@ -321,9 +331,11 @@ export default function Popout() {
       LOCAL_KEYS.settings,
       LOCAL_KEYS.splitHorizontal,
       LOCAL_KEYS.splitRatio,
+      LOCAL_KEYS.guideOpen,
       LOCAL_KEYS.queue,
       LOCAL_KEYS.notes
     ]).then((r) => {
+      setGuideOpen(r[LOCAL_KEYS.guideOpen] === true)
       applyFontSize(r[LOCAL_KEYS.commentFontSize])
       applyRelatedDisplaySize(r[LOCAL_KEYS.relatedDisplaySize])
       applySettings(r[LOCAL_KEYS.settings])
@@ -367,6 +379,48 @@ export default function Popout() {
   const updateCommentFontSize = (size: CommentFontSize) => {
     setCommentFontSize(size)
     void chrome.storage.local.set({ [LOCAL_KEYS.commentFontSize]: size })
+  }
+
+  /* ---- サイドバー ---- */
+
+  const refreshGuide = async () => {
+    if (tabId === null) return
+    setGuideLoading(true)
+    setGuideError(null)
+    const res = await askContent(tabId, "DOM_FETCH_GUIDE", undefined)
+    setGuide(isErr(res) ? EMPTY_GUIDE : res.data)
+    setGuideLoading(false)
+  }
+
+  // 開いたときに一度だけ取りに行く。メイン画面側は一度組み立てれば持ち続けるので、
+  // 動画が変わるたびに取り直す必要はない（更新ボタンで明示的に取り直せる）。
+  useEffect(() => {
+    if (!guideOpen || tabId === null || guide !== null || guideLoading) return
+    void refreshGuide()
+  }, [guideOpen, tabId, guide, guideLoading])
+
+  const toggleGuide = () => {
+    const next = !guideOpen
+    setGuideOpen(next)
+    void chrome.storage.local.set({ [LOCAL_KEYS.guideOpen]: next })
+  }
+
+  /**
+   * サイドバーの項目を押す。遷移も「もっと見る」の展開もメイン画面のYouTubeにさせる。
+   * ★ 返事が届かないのは異常ではない。YouTube以外（YouTube Music等）へ移る項目では
+   *   メイン画面のContent Scriptごと消えるため、そのときは黙って終える。
+   */
+  const activateGuideEntry = async (entry: GuideEntry) => {
+    if (tabId === null) return
+    setGuideError(null)
+    const res = await askContent(tabId, "GUIDE_ACTIVATE", {
+      id: entry.id,
+      title: entry.title,
+      href: entry.href
+    })
+    if (isErr(res)) return
+    setGuide(res.data.guide)
+    if (!res.data.ok) setGuideError(t.errSidebarEntryGone)
   }
 
   /** サブ画面で選んだ動画をメイン画面で再生する。メインがフルスクリーンならその状態を維持する */
@@ -666,6 +720,18 @@ export default function Popout() {
     <div className="flex h-screen flex-col bg-neutral-900 text-neutral-100 antialiased">
       {/* ヘッダー兼検索バー —— 縦の表示領域を稼ぐためタイトル行は廃止し、状態表示もここに統合した */}
       <form onSubmit={runSearch} className="flex items-center gap-2 border-b border-neutral-800 px-4 py-2.5">
+        {/* メイン画面と同じ位置（左端）に置く。開閉は次回も引き継ぐ */}
+        <button
+          type="button"
+          onClick={toggleGuide}
+          aria-label={guideOpen ? t.hideSidebar : t.showSidebar}
+          aria-pressed={guideOpen}
+          title={guideOpen ? t.hideSidebar : t.showSidebar}
+          className={`shrink-0 rounded p-1 transition hover:bg-neutral-800 hover:text-neutral-300 ${
+            guideOpen ? "text-neutral-300" : "text-neutral-500"
+          }`}>
+          <Menu size={14} />
+        </button>
         <Search size={14} className="shrink-0 text-neutral-500" />
         <input
           type="text"
@@ -734,7 +800,29 @@ export default function Popout() {
         </span>
       </form>
 
-      <main className="flex-1 overflow-y-auto p-4">
+      {/* サイドバーは表示モード（分割・コメント全画面・通常）に関係なく左端へ出す */}
+      <div className="relative flex min-h-0 flex-1">
+        {guideOpen && (
+          <>
+            {/* 窓が狭いときは本体を押し潰さず上に重ねる（YouTube本体も狭いとこうなる）。
+                重ねている間は、外側を押せば閉じられるようにする */}
+            <div
+              onClick={toggleGuide}
+              aria-hidden="true"
+              className="absolute inset-0 z-10 bg-black/60 md:hidden"
+            />
+            <GuidePanel
+              guide={guide}
+              loading={guideLoading}
+              error={guideError}
+              disabled={tabId === null}
+              onActivate={activateGuideEntry}
+              onRefresh={() => { setGuide(null); setGuideError(null) }}
+              t={t}
+            />
+          </>
+        )}
+      <main className="min-w-0 flex-1 overflow-y-auto p-4">
         {state === "no-tab" ? (
           <p className="mt-16 text-center text-sm leading-relaxed text-neutral-500">
             {t.noTabLine1}<br />
@@ -1265,7 +1353,101 @@ export default function Popout() {
           </>
         )}
       </main>
+      </div>
     </div>
+  )
+}
+
+/**
+ * メイン画面のサイドバーをそのまま並べる。
+ * ★ 見出しも項目名もYouTubeの表示文言のまま出す（言語ごとの言い回しをこちらで作らない）。
+ * ★ アイコンはYouTubeのSVGのパスデータだけを受け取り、自前の `<svg>` に渡して描く。
+ *   チャンネルの項目はアイコン画像、どちらも無い項目（「ショート」等）は点で代用する。
+ */
+function GuidePanel({ guide, loading, error, disabled, onActivate, onRefresh, t }: {
+  guide: GuideState | null
+  loading: boolean
+  error: string | null
+  disabled: boolean
+  onActivate: (entry: GuideEntry) => void
+  onRefresh: () => void
+  t: Dictionary
+}) {
+  return (
+    <aside className="absolute inset-y-0 left-0 z-20 flex w-56 shrink-0 flex-col border-r border-neutral-800 bg-neutral-900 md:static md:z-auto">
+      <div className="flex items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2">
+        <p className="text-[11px] font-medium text-neutral-400">{t.sidebar}</p>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={disabled || loading}
+          aria-label={t.refresh}
+          title={t.refresh}
+          className="rounded p-1 text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300 disabled:opacity-30">
+          <RefreshCw size={12} />
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto py-1">
+        {loading && (
+          <p className="flex items-center gap-2 px-3 py-2 text-[11px] text-neutral-500">
+            <Loader2 size={12} className="animate-spin" />
+            {t.sidebarLoading}
+          </p>
+        )}
+        {!loading && guide !== null && !guide.available && (
+          <p className="px-3 py-2 text-[11px] leading-relaxed text-neutral-500">{t.sidebarUnavailable}</p>
+        )}
+        {error && <p className="px-3 py-2 text-[11px] leading-relaxed text-red-400">{error}</p>}
+
+        {guide?.sections.map((section, index) => (
+          <div
+            key={`${index}:${section.title}`}
+            className={index > 0 ? "mt-1 border-t border-neutral-800 pt-1" : ""}>
+            {section.title && (
+              <p className="px-3 pb-0.5 pt-2 text-[10px] font-medium text-neutral-500">{section.title}</p>
+            )}
+            {section.entries.map((entry) => (
+              <GuideRow key={entry.id} entry={entry} disabled={disabled} onActivate={onActivate} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </aside>
+  )
+}
+
+function GuideRow({ entry, disabled, onActivate }: {
+  entry: GuideEntry
+  disabled: boolean
+  onActivate: (entry: GuideEntry) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onActivate(entry)}
+      disabled={disabled}
+      title={entry.title}
+      className="flex w-full items-center gap-3 px-3 py-1.5 text-left text-xs text-neutral-300 transition hover:bg-neutral-800 disabled:opacity-40">
+      <span className="grid h-6 w-6 shrink-0 place-items-center text-neutral-400">
+        {entry.avatarUrl ? (
+          <img
+            src={entry.avatarUrl}
+            alt=""
+            decoding="async"
+            referrerPolicy="no-referrer"
+            className="h-6 w-6 rounded-full object-cover"
+          />
+        ) : entry.iconPath ? (
+          <svg viewBox="0 0 24 24" width={18} height={18} fill="currentColor" aria-hidden="true">
+            <path d={entry.iconPath} />
+          </svg>
+        ) : (
+          <span className="h-1.5 w-1.5 rounded-full bg-neutral-600" />
+        )}
+      </span>
+      <span className="truncate">{entry.title}</span>
+    </button>
   )
 }
 
