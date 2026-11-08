@@ -951,6 +951,31 @@ const COMMENT_THREAD_SELECTOR = SELECTORS.comments.thread.join(",")
 const REPLIES_CONTAINER_SELECTOR = "#replies, #expanded-threads"
 
 /**
+ * そのスレッド**自身のもの**だけを引く。見つからなければ null。
+ *
+ * ★ CSSの子孫結合子は「ルートの外側にいる祖先」にも一致する。入れ子の返信スレッドSを
+ *   ルートにして `#replies #collapsed-threads #more-replies-sub-thread` を引くと、
+ *   Sの外側（親スレッド）の `#replies` を祖先として拾い得る。逆に、親スレッドをルートに
+ *   すると入れ子側のトグルや continuation を拾い得る。前者は誤った件数、後者は
+ *   **別の階層のボタンを押す**ことになる。要素の持ち主（最も近い
+ *   `ytd-comment-thread-renderer`）がこのスレッド自身かで絞る。
+ *   directReplyElements() が返信を直下に絞るのと同じ考え方。
+ * ★ 候補は q() と同じく上から順に試すが、自分のものでない一致は飛ばして次を見る
+ *   （先頭候補が他階層にだけ一致したせいで、後続候補の自分の一致を取り逃さないため）。
+ */
+function qOwn<T extends Element = HTMLElement>(
+  candidates: readonly string[],
+  thread: Element
+): T | null {
+  for (const selector of candidates) {
+    for (const el of thread.querySelectorAll(selector)) {
+      if (el.closest(COMMENT_THREAD_SELECTOR) === thread) return el as unknown as T
+    }
+  }
+  return null
+}
+
+/**
  * コメント要素から、そのコメントを「自身のコメント＋自身宛ての返信欄」として持つ
  * スレッド要素（`ytd-comment-thread-renderer`）を返す。持たないなら null。
  *
@@ -1087,9 +1112,25 @@ function readLikeCount(el: Element): number | undefined {
 }
 
 function readReplyCount(el: Element): number | undefined {
-  const raw = text(SELECTORS.comments.replyCountText, el)
+  // text() と同じ読み方（textContent）。innerText は jsdom に無く、実機とも挙動が揺れる。
+  const raw = (qOwn(SELECTORS.comments.replyCountText, el)?.textContent ?? "").replace(/\s+/g, " ").trim()
   if (!raw) return undefined
   return parseApproxCount(raw)
+}
+
+/**
+ * そのスレッドが「返信を開くボタン」を持っているか。
+ *
+ * ★ 2026-11-08 実測: 畳んだトップレベルのトグルは「14 件の返信」と**数字を出す**が、
+ *   入れ子の返信のトグルは「返信を表示」で**数字を持たない**。その返信の返信がまだ
+ *   DOMに無い場合、件数は数字からも実数からも取れず undefined になる。
+ *   件数だけでトグルの有無を決めると、メイン画面には「返信を表示」が出ているのに
+ *   サブ画面には何も出ず、ユーザーはその返信へ辿り着けない
+ *   （実機で @jhbrennan-1 の返信がこの状態だった）。
+ */
+function threadHasReplyToggle(thread: Element): boolean {
+  const toggle = qOwn<HTMLElement>(SELECTORS.comments.replyToggle, thread)
+  return toggle !== null && !toggle.matches(":disabled, [disabled], [aria-disabled='true']")
 }
 
 /**
@@ -1172,6 +1213,9 @@ async function loadRepliesFor(commentId: string): Promise<FeedItem[]> {
 }
 
 type ReplyLoadResult = { items: FeedItem[]; reason?: ReplyLoadFailure }
+
+/** 一度押した返信の continuation。同じボタンを押し直さない（本体・関連動画と同じ扱い）。 */
+const clickedReplyContinuations = new WeakSet<HTMLElement>()
 
 /** 処理中の返信読み込み。同じidを同時に二重実行しない（トグルを2回押すと畳んでしまう）。 */
 const replyLoadsInFlight = new Map<string, Promise<ReplyLoadResult>>()
@@ -1269,7 +1313,7 @@ async function loadRepliesDetailed(
   const alreadyLoaded = directReplyElements(thread).length > 0
   let toggled = alreadyLoaded
   if (!alreadyLoaded) {
-    const toggle = q<HTMLElement>(SELECTORS.comments.replyToggle, thread)
+    const toggle = qOwn<HTMLElement>(SELECTORS.comments.replyToggle, thread)
     if (toggle && !toggle.matches(":disabled, [disabled], [aria-disabled='true']")) {
       toggle.click()
       toggled = true
@@ -1280,8 +1324,23 @@ async function loadRepliesDetailed(
     // 短い間隔で様子を見ながらnudgeIntoViewportで刺激する（他機能に合わせて700ms間隔）。
     for (let attempt = 0; attempt < REPLY_LOAD_ATTEMPTS; attempt++) {
       const target = findOwnThread()
-      const continuation = target && q<HTMLElement>(SELECTORS.comments.repliesContinuation, target)
-      if (continuation) nudgeIntoViewport(continuation, () => {}, 700)
+      const continuation = target && qOwn<HTMLElement>(SELECTORS.comments.repliesContinuation, target)
+      if (continuation) {
+        // ★ 2026-11-08 実測: 入れ子の返信の continuation は
+        //   `ytd-continuation-item-renderer.replies-continuation` の中の「他の返信を表示」
+        //   ボタンで、**交差させるだけでは読み込まれない**（8秒間 viewport に入れても0件のまま、
+        //   1回押した瞬間に返信が現れた）。コメント本体や関連動画の continuation と同じく、
+        //   検証済みhost内の専用ボタンだけを押す既存の経路に乗せる。押せなかったDOM世代では
+        //   従来どおり交差刺激へ戻す。
+        if (
+          !clickedReplyContinuations.has(continuation) &&
+          clickContinuationControl(continuation, SELECTORS.comments.continuationButton)
+        ) {
+          clickedReplyContinuations.add(continuation)
+        } else {
+          nudgeIntoViewport(continuation, () => {}, 700)
+        }
+      }
       await new Promise((resolve) => window.setTimeout(resolve, REPLY_LOAD_INTERVAL_MS))
       const refreshed = findOwnThread()
       if (refreshed && directReplyElements(refreshed).length > 0) break
@@ -1299,11 +1358,19 @@ async function loadRepliesDetailed(
     // 見ないので、ここで補ってサブ画面に「返信 N件」のトグルを出せるようにする。
     const ownThread = resolveOwnThread(replyEl)
     const nestedCount = ownThread && ownThread !== parent ? readThreadReplyCount(ownThread) : undefined
+    const nestedHasReplies =
+      !nestedCount && ownThread !== null && ownThread !== parent && threadHasReplyToggle(ownThread)
     // 返信も遅延読み込みなので、この時点では avatarUrl が空のことが多い。以前の取得や
     // 後追いの補完で既に埋まっていれば、その値を引き継ぐ（再取得で空に戻さない）。
     const known = replyItemCache.get(item.id)
     const avatarUrl = item.avatarUrl || known?.avatarUrl || ""
-    items.push({ ...item, avatarUrl, parentId: commentId, ...(nestedCount ? { replyCount: nestedCount } : {}) })
+    items.push({
+      ...item,
+      avatarUrl,
+      parentId: commentId,
+      ...(nestedCount ? { replyCount: nestedCount } : {}),
+      ...(nestedHasReplies ? { hasReplies: true } : {})
+    })
   }
   if (items.length === 0) return { items, reason: toggled ? "timeout" : "no-toggle" }
 
@@ -1323,6 +1390,8 @@ function parseCommentThread(el: Element): FeedItem | null {
   // スレッド要素なら件数が取れる。返信のview-modelでは自身の返信欄を持たないので
   // undefinedになり、loadRepliesFor()側で包んでいるスレッドから補う。
   const replyCount = readThreadReplyCount(el)
+  // 件数が読めなくても、開くボタンがあるなら「返信あり」として伝える（上の注記を参照）
+  const hasReplies = !replyCount && threadHasReplyToggle(el)
   const pinnedLabel = text(SELECTORS.comments.pinnedBadge, el)
   return {
     // permalinkのlc、またはDOM内容由来のfallback hashを安定キーにする。
@@ -1335,6 +1404,7 @@ function parseCommentThread(el: Element): FeedItem | null {
     ...(likeButton ? { liked: readLikedState(likeButton) } : {}),
     ...(likeCount !== undefined ? { likeCount } : {}),
     ...(replyCount ? { replyCount } : {}),
+    ...(hasReplies ? { hasReplies: true } : {}),
     ...(pinnedLabel ? { pinnedLabel } : {})
   }
 }

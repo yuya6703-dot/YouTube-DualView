@@ -93,6 +93,10 @@ export interface FeedItem {
   likeCount?: number   // 取得できなければ省略（表示側は"—"扱い）
   liked?: boolean      // メイン画面上での「いいね」状態
   replyCount?: number  // 0または未定義なら返信なし
+  // ★ 「返信はあるが件数が読めない」。入れ子の返信のトグルは「返信を表示」で**数字を持たない**
+  //   （2026-11-08 実測）。件数だけを頼りにすると、その返信にはサブ画面でトグルが出ず、
+  //   ユーザーは返信へ辿り着けない（報告「返信が表示されない」）。
+  hasReplies?: boolean
   parentId?: string    // 返信コメントの場合、親コメントのid（未定義ならトップレベル）
   // 固定コメントの帯。YouTube側の文言をそのまま入れる（例: "@channel さんによって固定されています"）
   pinnedLabel?: string

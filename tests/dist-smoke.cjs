@@ -359,6 +359,12 @@ async function subWindow() {
   assert.deepEqual(JSON.parse(JSON.stringify(top?.payload ?? null)), { commentId: "c1", ancestors: [] },
     "E: トップレベルのコメントには親がいない")
 
+  // 件数が読めない返信（YouTubeのトグルが「返信を表示」で数字を持たない）でも開ける（v86）
+  toSubWindow({ type: "FEED_APPEND", payload: { kind: "comment", items: [feedItem("c2", { hasReplies: true })] } })
+  await wait(400)
+  const showReplies = [...doc.querySelectorAll("button")].find((b) => b.textContent.trim() === "返信を表示")
+  assert.ok(showReplies, "E: 件数が読めなくても返信を開くボタンを出す")
+
   const nestedButton = replyButtons().find((b) => b.textContent === "返信 2件")
   assert.ok(nestedButton, "E: 返信の行にも、その返信を開くトグルが出る")
   replyAnswer = { items: [feedItem("c1.r1.a", { parentId: "c1.r1" }), feedItem("c1.r1.b", { parentId: "c1.r1" })] }
@@ -371,7 +377,7 @@ async function subWindow() {
   assert.ok(doc.body.textContent.includes("Comment c1.r1.a"), "E: 返信への返信が並ぶ")
 
   console.log("E サブ画面               →", JSON.stringify(panes.map((p) => p.querySelector("p")?.textContent.trim())),
-    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持 / チャンネル名と登録ボタン: あり / サイドバー: 再現 / 返信の返信: 親を添えて要求")
+    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持 / チャンネル名と登録ボタン: あり / サイドバー: 再現 / 返信の返信: 親を添えて要求 / 件数不明の返信: 開ける")
   win.close()
 }
 

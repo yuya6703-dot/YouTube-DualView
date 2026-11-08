@@ -2032,6 +2032,9 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
   //   「返信 N件」のトグル自体が消えて再取得できなくなる（v63 の再クリック再取得が成立しない）。
   const repliesLoaded = replies !== null && replies.length > 0
   const displayReplyCount = repliesLoaded ? replies.length : item.replyCount
+  // ★ 件数が読めない返信（メイン画面のトグルが「返信を表示」で数字を持たない場合）でも
+  //   開けるようにする。件数でトグルの有無を決めると、返信があるのに辿り着けなくなる。
+  const canOpenReplies = repliesLoaded || !!item.replyCount || !!item.hasReplies
 
   // ★ 返信の先読み。行が画面内に入ったら、開かれる前にメイン側で返信を展開して
   //   アイコンまで準備しておく（返信のアイコンURLは YouTube が返信を描画して初めて現れるため）。
@@ -2042,7 +2045,7 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
   const prefetchedRef = useRef(false)
   useEffect(() => {
     if (tabId === null || prefetchedRef.current) return
-    if (replies !== null || !displayReplyCount) return
+    if (replies !== null || !canOpenReplies) return
     const el = rowRef.current
     if (!el || typeof IntersectionObserver === "undefined") return
     const observer = new IntersectionObserver((entries) => {
@@ -2058,7 +2061,7 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
     }, { rootMargin: "200px 0px" })
     observer.observe(el)
     return () => observer.disconnect()
-  }, [tabId, replies, displayReplyCount, item.id])
+  }, [tabId, replies, canOpenReplies, item.id])
 
   const toggleReplies = async () => {
     // ★ 空の結果は最終結果として記憶しない。YouTube側の読み込みが待ち時間に間に合わなかった
@@ -2191,7 +2194,7 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
           {/* 返信行にも出す。新スレッドUIでは返信がさらに返信を持てるため、
               CommentRowが再帰的にネストして「返信の返信」を辿れる。
               件数はCS側が包んでいるスレッドから補って渡してくる。 */}
-          {!!displayReplyCount && (
+          {canOpenReplies && (
             <button
               onClick={toggleReplies}
               disabled={repliesLoading}
@@ -2204,7 +2207,7 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
                 <ChevronDown size={12} />
               )}
               <CornerDownRight size={12} />
-              {t.replyCount(displayReplyCount ?? 0)}
+              {displayReplyCount ? t.replyCount(displayReplyCount) : t.showReplies}
             </button>
           )}
 

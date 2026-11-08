@@ -1245,3 +1245,84 @@ test("re-opening a parent never clicks a toggle twice (that would collapse the t
   assert.deepEqual(Array.from((await settle(h, child)).items, (item) => item.id), ["lc:parent.r1.r1"])
   assert.deepEqual(order, ["parent", "parent.r1"])
 })
+
+// ---- 件数を出さない返信と、押さないと来ない返信（v86） ----
+
+/** 入れ子の返信のトグルは「返信を表示」で数字を持たない（2026-11-08 実測）。 */
+const withoutReplyCount = (html) =>
+  html.replace(/<button>\d+ 件の返信<\/button>/, "<button>返信を表示</button>")
+
+test("a reply whose toggle shows no number still offers a way in", async (t) => {
+  const h = setup(t, section(threadWithReplies("parent", 3)))
+  h.start()
+  stubThreads(h, {
+    parent: withoutReplyCount(subReply("parent.r1", 1)) + subReply("parent.r2"),
+    "parent.r1": subReply("parent.r1.r1")
+  })
+
+  const first = await settle(h, h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:parent" }))
+  const r1 = Array.from(first.items).find((item) => item.id === "lc:parent.r1")
+  const r2 = Array.from(first.items).find((item) => item.id === "lc:parent.r2")
+  assert.equal(r1.replyCount, undefined, "YouTubeが数字を出していないので件数は分からない")
+  assert.equal(r1.hasReplies, true, "それでも『返信はある』ことは伝える")
+  assert.equal(r2.hasReplies, undefined, "返信を持たない行には何も立てない")
+
+  // そして実際に開ける（件数が無いだけで、中身は普通に取れる）
+  const nested = await settle(h, h.handlers.COMMENT_LOAD_REPLIES({
+    commentId: "lc:parent.r1", ancestors: ["lc:parent"]
+  }))
+  assert.deepEqual(Array.from(nested.items, (item) => item.id), ["lc:parent.r1.r1"])
+})
+
+// ★ 2026-11-08 実測: 入れ子の返信の continuation は
+//   `ytd-continuation-item-renderer.replies-continuation` の中の「他の返信を表示」ボタンで、
+//   **交差させるだけでは読み込まれない**（8秒 viewport に入れても0件のまま、1回押した瞬間に現れた）。
+const repliesContinuation = `
+  <ytd-continuation-item-renderer class="replies-continuation">
+    <div id="button"><ytd-button-renderer><yt-button-shape>
+      <button>他の返信を表示</button>
+    </yt-button-shape></ytd-button-renderer></div>
+  </ytd-continuation-item-renderer>`
+
+test("replies that only arrive when the continuation button is pressed are still loaded", async (t) => {
+  const h = setup(t, section(threadWithReplies("parent", 2)))
+  h.start()
+  const thread = h.doc.querySelector("ytd-comment-thread-renderer")
+  let continuationClicks = 0
+
+  // トグルを押すと continuation だけが現れる。返信はそのボタンを押すまで来ない。
+  thread.querySelector("#more-replies-sub-thread button").addEventListener("click", () => {
+    h.win.setTimeout(() => {
+      thread.querySelector(":scope > #replies > ytd-comment-replies-renderer")
+        .insertAdjacentHTML("beforeend", `<div id="expanded-threads">${repliesContinuation}</div>`)
+      thread.querySelector(".replies-continuation button").addEventListener("click", () => {
+        continuationClicks += 1
+        h.win.setTimeout(() => {
+          thread.querySelector("#expanded-threads").insertAdjacentHTML("beforeend", subReply("parent.r1"))
+          thread.querySelector(".replies-continuation").remove()
+        }, 300)
+      })
+    }, 300)
+  })
+
+  const result = await settle(h, h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:parent" }))
+  assert.equal(continuationClicks, 1, "continuation のボタンはちょうど一度だけ押す")
+  assert.deepEqual(Array.from(result.items, (item) => item.id), ["lc:parent.r1"])
+})
+
+test("a nested thread's own toggle is used, never an outer thread's", async (t) => {
+  // ★ CSSの子孫結合子はルートの外側の祖先にも一致する。入れ子のスレッドをルートに
+  //   `#replies #collapsed-threads #more-replies-sub-thread` を引くと、親側のトグルを
+  //   拾い得る。拾ってしまうと「親のトグルを押して親を畳む」事故になる。
+  const h = setup(t, section(threadWithReplies("parent", 3)))
+  h.start()
+  const order = stubThreads(h, {
+    parent: withoutReplyCount(subReply("parent.r1", 1)),
+    "parent.r1": subReply("parent.r1.r1")
+  })
+  await settle(h, h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:parent" }))
+  await settle(h, h.handlers.COMMENT_LOAD_REPLIES({
+    commentId: "lc:parent.r1", ancestors: ["lc:parent"]
+  }))
+  assert.deepEqual(order, ["parent", "parent.r1"], "押したのは各スレッド自身のトグルだけ")
+})

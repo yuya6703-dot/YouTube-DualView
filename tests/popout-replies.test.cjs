@@ -432,3 +432,25 @@ test("a reply row asks for its own replies with the chain of parents", async (t)
     "返信の返信は、外側の親から順に添えて頼む")
   assert.equal(container.querySelectorAll("li").length, 4, "コメント＋返信＋その返信2件")
 })
+
+// ★ 入れ子の返信のトグルは「返信を表示」で数字を持たない（2026-11-08 実測）。件数だけで
+//   トグルの有無を決めると、メイン画面には「返信を表示」が出ているのにサブ画面には何も出ず、
+//   その返信へ辿り着けない（報告「返信が表示されない」）。
+test("a reply whose count YouTube does not show still offers a way in", async (t) => {
+  const { container, click } = await render(t, { ...comment("c6"), hasReplies: true })
+  const labelled = (txt) => [...container.querySelectorAll("button")].find((b) => b.textContent.trim() === txt)
+
+  const toggle = labelled("返信を表示")
+  assert.ok(toggle, "件数が無くても開くボタンを出す")
+
+  respond = () => ({ ok: true, data: { items: [reply("r1", "c6")] } })
+  await click(toggle)
+  assert.deepEqual(sent.at(-1).payload, { commentId: "c6", ancestors: [] })
+  assert.equal(container.querySelectorAll("li").length, 2, "コメントと返信1件")
+  assert.ok(labelled("返信 1件"), "読み込めたら実数の表示に変わる")
+})
+
+test("a comment with neither a count nor replies shows no reply toggle", async (t) => {
+  const { container } = await render(t, comment("c7"))
+  assert.equal([...container.querySelectorAll("button")].filter((b) => /返信 \d+件|返信を表示/.test(b.textContent)).length, 0)
+})

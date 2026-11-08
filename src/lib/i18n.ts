@@ -119,6 +119,8 @@ export interface Dictionary {
   showFullComment: string
   showPartialComment: string
   replyCount: (n: number) => string
+  /** 件数が読めないときの返信トグルの文言 */
+  showReplies: string
   replyAction: string
   replyPlaceholder: string
   repliesUnavailable: string
@@ -291,6 +293,8 @@ const ja: Dictionary = {
   showFullComment: "詳細",
   showPartialComment: "一部を表示",
   replyCount: (n) => `返信 ${n}件`,
+  // 件数が読めないときの表示。YouTube自身の文言に合わせる
+  showReplies: "返信を表示",
   replyAction: "返信する",
   replyPlaceholder: "返信を入力",
   repliesUnavailable: "返信を取得できませんでした",
@@ -459,6 +463,7 @@ const en: Dictionary = {
   showFullComment: "Show more",
   showPartialComment: "Show less",
   replyCount: (n) => `${n} ${n === 1 ? "reply" : "replies"}`,
+  showReplies: "Show replies",
   replyAction: "Reply",
   replyPlaceholder: "Add a reply",
   repliesUnavailable: "Couldn't load replies",
