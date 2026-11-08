@@ -1930,9 +1930,15 @@ function NoteRow({ note, onJump, onRemove, t }: {
 /** 件数を短く表示する。1000未満はそのまま、以上は"1.2万"のような概算にはせず単純にkカンマ区切り */
 const fmtCount = (n: number) => (n >= 10000 ? `${(n / 10000).toFixed(1)}万` : n.toLocaleString())
 
-function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = false }: {
+/** 既定の祖先。トップレベルのコメントには親がいない。 */
+const EMPTY_ANCESTORS: readonly string[] = []
+
+function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = false, ancestors = EMPTY_ANCESTORS }: {
   item: FeedItem; size: CommentFontSize; tabId: number | null; t: Dictionary
   settings: Settings; replyAvatars: Record<string, string>; isReply?: boolean
+  // ★ この返信にたどり着くまでに開く必要がある親を外側から順に。メイン画面が作り直されると
+  //   返信はDOMから消えるため、これが無いとCS側は二度と見つけられない（v85）。
+  ancestors?: readonly string[]
 }) {
   const cls = COMMENT_SIZE_CLASSES[size]
   // 返信のアイコンは応答時点で空のことが多く、後から REPLY_AVATAR で届く（usePlayerPort）。
@@ -2044,7 +2050,7 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
       observer.disconnect()
       prefetchedRef.current = true
       void (async () => {
-        const res = await askContent(tabId, "COMMENT_LOAD_REPLIES", { commentId: item.id, prefetch: true })
+        const res = await askContent(tabId, "COMMENT_LOAD_REPLIES", { commentId: item.id, ancestors: [...ancestors], prefetch: true })
         if (isErr(res) || res.data.items.length === 0) return
         // クリックで先に取れていたらそちらを優先。空（失敗）なら先読み結果で埋める
         setReplies((prev) => (prev && prev.length > 0 ? prev : res.data.items))
@@ -2065,7 +2071,7 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
     }
     if (tabId === null || repliesLoading) return
     setRepliesLoading(true)
-    const res = await askContent(tabId, "COMMENT_LOAD_REPLIES", { commentId: item.id })
+    const res = await askContent(tabId, "COMMENT_LOAD_REPLIES", { commentId: item.id, ancestors: [...ancestors] })
     setRepliesLoading(false)
     if (isErr(res)) return
     setReplies(res.data.items)
@@ -2258,7 +2264,7 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
         {repliesOpen && replies && replies.length > 0 && (
           <ul className="mt-1 border-l border-neutral-800 pl-2">
             {replies.map((reply) => (
-              <CommentRow key={reply.id} item={reply} size={size} tabId={tabId} t={t} settings={settings} replyAvatars={replyAvatars} isReply />
+              <CommentRow key={reply.id} item={reply} size={size} tabId={tabId} t={t} settings={settings} replyAvatars={replyAvatars} isReply ancestors={[...ancestors, item.id]} />
             ))}
           </ul>
         )}

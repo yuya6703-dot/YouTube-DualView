@@ -1106,3 +1106,142 @@ test("an icon is carried over only when it really is path data", async (t) => {
   assert.deepEqual(plain(guide.sections[0].entries.map((entry) => entry.iconPath)), [HOME_PATH, ""],
     "パスデータとして妥当な文字以外は持ち出さない")
 })
+
+// ---- 返信への返信（v85） ----
+//
+// ★ 2026-11-08 実測（watchページ・「14 件の返信」のスレッド）: 返信は1件ずつ
+//   `yt-sub-thread > div > ytd-comment-thread-renderer` に包まれ、その中の `#replies` に
+//   「返信への返信」がぶら下がる。14件のうち直下は5件で、残り9件はその5件の内側にいた。
+//   この入れ子は**親が展開されている間しかDOMに無い**。メイン画面を読み込み直すと
+//   返信のview-modelは0件に戻る（実測）。一方サブ画面は返信の行を持ち続けるため、
+//   そこで「返信 3件」を押すと not-found になり、何度押しても直らなかった
+//   （ユーザー報告「返信が表示されない」）。
+const subReply = (id, replyCount) => `
+  <yt-sub-thread><div>
+    <ytd-comment-thread-renderer>
+      <div id="comment-container"><ytd-comment-view-model>
+        <a id="author-text">Replier</a>
+        <div id="author-thumbnail"><img src="https://yt3.ggpht.com/avatar.jpg"></div>
+        <span id="published-time-text"><a href="/watch?v=current&lc=${id}">1 day ago</a></span>
+        <div id="content-text">Reply ${id}</div>
+      </ytd-comment-view-model></div>
+      <div id="replies"><ytd-comment-replies-renderer>${replyCount
+        ? `<div id="collapsed-threads"><div id="more-replies-sub-thread"><button>${replyCount} 件の返信</button></div></div>`
+        : ""}</ytd-comment-replies-renderer></div>
+    </ytd-comment-thread-renderer>
+  </div></yt-sub-thread>`
+
+// idごとに「その返信の中身」を持つYouTubeを再現する。トグルを押すと delayMs 後に中身が現れ、
+// 現れた返信のトグルもその場で効くようになる（本物と同じく入れ子は後から生える）。
+function stubThreads(h, tree, delayMs = 400) {
+  const wired = new WeakSet()
+  const order = []
+  const idOf = (thread) => {
+    const link = thread.querySelector(":scope > #comment-container a[href*='lc=']")
+    return new URL(link.getAttribute("href"), "https://www.youtube.com").searchParams.get("lc")
+  }
+  const wireAll = () => {
+    for (const button of h.doc.querySelectorAll("#more-replies-sub-thread button")) {
+      if (wired.has(button)) continue
+      wired.add(button)
+      const owner = button.closest("ytd-comment-thread-renderer")
+      const id = idOf(owner)
+      button.addEventListener("click", () => {
+        order.push(id)
+        const html = tree[id]
+        if (!html) return
+        h.win.setTimeout(() => {
+          owner.querySelector(":scope > #replies > ytd-comment-replies-renderer")
+            .insertAdjacentHTML("beforeend", `<div id="expanded-threads">${html}</div>`)
+          wireAll()
+        }, delayMs)
+      })
+    }
+  }
+  wireAll()
+  return order
+}
+
+test("a reply that has replies of its own reports how many, and hands them over when asked", async (t) => {
+  const h = setup(t, section(threadWithReplies("parent", 3)))
+  h.start()
+  stubThreads(h, {
+    parent: subReply("parent.r1", 1) + subReply("parent.r2"),
+    "parent.r1": subReply("parent.r1.r1")
+  })
+
+  const first = await settle(h, h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:parent" }))
+  assert.deepEqual(Array.from(first.items, (item) => item.id), ["lc:parent.r1", "lc:parent.r2"])
+  assert.deepEqual(Array.from(first.items, (item) => item.replyCount), [1, undefined],
+    "入れ子の返信を持つ行だけが件数を持つ")
+
+  const nested = await settle(h, h.handlers.COMMENT_LOAD_REPLIES({
+    commentId: "lc:parent.r1", ancestors: ["lc:parent"]
+  }))
+  assert.deepEqual(Array.from(nested.items, (item) => item.id), ["lc:parent.r1.r1"])
+  assert.deepEqual(Array.from(nested.items, (item) => item.parentId), ["lc:parent.r1"])
+})
+
+test("a nested reply is brought back by re-opening its parent after the main window is rebuilt", async (t) => {
+  const tree = {
+    parent: subReply("parent.r1", 1) + subReply("parent.r2"),
+    "parent.r1": subReply("parent.r1.r1")
+  }
+  const h = setup(t, section(threadWithReplies("parent", 3)))
+  h.start()
+  stubThreads(h, tree)
+  await settle(h, h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:parent" }))
+
+  // メイン画面が作り直される（読み込み直し・SPAの再描画・YouTubeによるスレッド要素の作り直し）。
+  // サブ画面はこのとき返信の行を持ったままなので、押されるのは「もうDOMに無いid」になる。
+  h.doc.querySelector("ytd-comments #contents").innerHTML = threadWithReplies("parent", 3)
+  stubThreads(h, tree)
+  assert.equal(h.doc.querySelectorAll("ytd-comment-replies-renderer ytd-comment-view-model").length, 0,
+    "作り直したメイン画面に返信は1件も残っていない")
+
+  // 親の並びが無いと、以前と同じく詰む（これが報告された状態）
+  const blind = await settle(h, h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:parent.r1" }))
+  assert.equal(blind.items.length, 0)
+  assert.equal(blind.reason, "not-found")
+
+  // 親の並びを添えると、外側から開き直して呼び戻す
+  const revived = await settle(h, h.handlers.COMMENT_LOAD_REPLIES({
+    commentId: "lc:parent.r1", ancestors: ["lc:parent"]
+  }))
+  assert.equal(revived.reason, undefined)
+  assert.deepEqual(Array.from(revived.items, (item) => item.id), ["lc:parent.r1.r1"])
+})
+
+test("a reply two levels down re-opens every parent, outermost first", async (t) => {
+  const tree = {
+    parent: subReply("parent.r1", 1),
+    "parent.r1": subReply("parent.r1.r1", 1),
+    "parent.r1.r1": subReply("parent.r1.r1.r1")
+  }
+  const h = setup(t, section(threadWithReplies("parent", 3)))
+  h.start()
+  const order = stubThreads(h, tree)
+
+  const result = await settle(h, h.handlers.COMMENT_LOAD_REPLIES({
+    commentId: "lc:parent.r1.r1", ancestors: ["lc:parent", "lc:parent.r1"]
+  }))
+  assert.deepEqual(Array.from(result.items, (item) => item.id), ["lc:parent.r1.r1.r1"])
+  assert.deepEqual(order, ["parent", "parent.r1", "parent.r1.r1"],
+    "外側から順に開く。内側から押しても親がまだ無いので開けない")
+})
+
+test("re-opening a parent never clicks a toggle twice (that would collapse the thread)", async (t) => {
+  const tree = { parent: subReply("parent.r1", 1), "parent.r1": subReply("parent.r1.r1") }
+  const h = setup(t, section(threadWithReplies("parent", 3)))
+  h.start()
+  const order = stubThreads(h, tree)
+
+  // サブ画面は行が見えた順に先読みする。親と子が続けて来ても、親のトグルは一度しか押さない。
+  const parent = h.handlers.COMMENT_LOAD_REPLIES({ commentId: "lc:parent", prefetch: true })
+  const child = h.handlers.COMMENT_LOAD_REPLIES({
+    commentId: "lc:parent.r1", ancestors: ["lc:parent"], prefetch: true
+  })
+  assert.deepEqual(Array.from((await settle(h, parent)).items, (item) => item.id), ["lc:parent.r1"])
+  assert.deepEqual(Array.from((await settle(h, child)).items, (item) => item.id), ["lc:parent.r1.r1"])
+  assert.deepEqual(order, ["parent", "parent.r1"])
+})

@@ -199,6 +199,8 @@ async function subWindow() {
     }]
   }
   let toSubWindow = null
+  // COMMENT_LOAD_REPLIES にどう答えるか。入れ子の返信を試すため途中で差し替える
+  let replyAnswer = { items: [] }
   const noop = () => {}
   const dom = new JSDOM(popoutHtml.replace(/<script[^>]*><\/script>/, ""), {
     url: "chrome-extension://smoke/tabs/popout.html", runScripts: "outside-only", pretendToBeVisual: true,
@@ -241,6 +243,7 @@ async function subWindow() {
             toMainWindow.push(env)
             if (env.action === "DOM_FETCH_GUIDE") return { ok: true, data: smokeGuide }
             if (env.action === "GUIDE_ACTIVATE") return { ok: true, data: { ok: true, guide: smokeGuide } }
+            if (env.action === "COMMENT_LOAD_REPLIES") return { ok: true, data: replyAnswer }
             return { ok: true, data: {} }
           },
           create: async () => ({})
@@ -337,8 +340,38 @@ async function subWindow() {
     { id: "s0:e0", title: "ホーム", href: "/" },
     "E: 押すとメイン画面の同じ項目を押させる")
 
+  // 返信への返信（v85）。返信の行も自分の返信を開け、そのとき「開くべき親」を一緒に送る。
+  // ★ 返信はメイン画面で親が開いている間しかDOMに無い。メイン画面が作り直されると消えるので、
+  //   親の並びが無いとCS側は二度と見つけられない（ユーザー報告「返信が表示されない」）。
+  const feedItem = (id, extra = {}) => ({
+    id, author: "Author " + id, avatarUrl: "", text: "Comment " + id,
+    tokens: [{ t: "text", v: "Comment " + id }], ...extra
+  })
+  toSubWindow({ type: "FEED_APPEND", payload: { kind: "comment", items: [feedItem("c1", { replyCount: 1 })] } })
+  await wait(400)
+  const replyButtons = () => [...doc.querySelectorAll("button")].filter((b) => /^返信 \d+件$/.test(b.textContent))
+  assert.equal(replyButtons().length, 1, "E: コメントに返信のトグルが出る")
+
+  replyAnswer = { items: [feedItem("c1.r1", { parentId: "c1", replyCount: 2 })] }
+  replyButtons()[0].dispatchEvent(new win.MouseEvent("click", { bubbles: true }))
+  await wait(400)
+  const top = toMainWindow.filter((env) => env.action === "COMMENT_LOAD_REPLIES").at(-1)
+  assert.deepEqual(JSON.parse(JSON.stringify(top?.payload ?? null)), { commentId: "c1", ancestors: [] },
+    "E: トップレベルのコメントには親がいない")
+
+  const nestedButton = replyButtons().find((b) => b.textContent === "返信 2件")
+  assert.ok(nestedButton, "E: 返信の行にも、その返信を開くトグルが出る")
+  replyAnswer = { items: [feedItem("c1.r1.a", { parentId: "c1.r1" }), feedItem("c1.r1.b", { parentId: "c1.r1" })] }
+  nestedButton.dispatchEvent(new win.MouseEvent("click", { bubbles: true }))
+  await wait(400)
+  const nested = toMainWindow.filter((env) => env.action === "COMMENT_LOAD_REPLIES").at(-1)
+  assert.deepEqual(JSON.parse(JSON.stringify(nested?.payload ?? null)),
+    { commentId: "c1.r1", ancestors: ["c1"] },
+    "E: 返信の返信は、外側の親から順に添えて頼む")
+  assert.ok(doc.body.textContent.includes("Comment c1.r1.a"), "E: 返信への返信が並ぶ")
+
   console.log("E サブ画面               →", JSON.stringify(panes.map((p) => p.querySelector("p")?.textContent.trim())),
-    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持 / チャンネル名と登録ボタン: あり / サイドバー: 再現")
+    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持 / チャンネル名と登録ボタン: あり / サイドバー: 再現 / 返信の返信: 親を添えて要求")
   win.close()
 }
 

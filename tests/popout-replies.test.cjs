@@ -97,7 +97,7 @@ test("a failed reply load keeps the reply button so one more click retries", asy
   respond = () => ({ ok: true, data: { items: ["r1", "r2", "r3"].map((id) => reply(id, "c1")) } })
   await click(replyButton())
   assert.equal(sent.filter((m) => m.action === "COMMENT_LOAD_REPLIES").length, 2, "a single click re-fetches")
-  assert.deepEqual(sent.at(-1).payload, { commentId: "c1" })
+  assert.deepEqual(sent.at(-1).payload, { commentId: "c1", ancestors: [] })
   assert.equal(container.querySelectorAll("li").length, 4) // the comment and its three replies
   assert.doesNotMatch(text(), /返信を取得できませんでした/)
   assert.equal(replyButton()?.textContent, "返信 3件")
@@ -409,4 +409,26 @@ test("pressing a sidebar entry hands the whole entry back so the main window can
 test("a sidebar that could not be read says so instead of showing nothing", async (t) => {
   const { text } = await renderGuide(t, { guide: { available: false, sections: [] } })
   assert.match(text(), /サイドバーを取得できませんでした/)
+})
+
+// 返信の行も自分の返信を開ける。そのとき「ここへ辿り着くまでに開く親」を一緒に送る。
+// ★ メイン画面が作り直されると返信はDOMから消えるため、これが無いとCS側は二度と
+//   見つけられず not-found のままになる（2026-11-08 ユーザー報告「返信が表示されない」）。
+test("a reply row asks for its own replies with the chain of parents", async (t) => {
+  const { container, click } = await render(t, comment("c5", 1))
+  const replyButtons = () => [...container.querySelectorAll("button")]
+    .filter((b) => /^返信 \d+件$/.test(b.textContent))
+
+  respond = () => ({ ok: true, data: { items: [{ ...reply("r1", "c5"), replyCount: 2 }] } })
+  await click(replyButtons()[0])
+  assert.deepEqual(sent.at(-1).payload, { commentId: "c5", ancestors: [] },
+    "トップレベルのコメントには親がいない")
+
+  respond = () => ({ ok: true, data: { items: [reply("r1.a", "r1"), reply("r1.b", "r1")] } })
+  const nested = replyButtons().find((b) => b.textContent === "返信 2件")
+  assert.ok(nested, "入れ子の返信にもトグルが出る")
+  await click(nested)
+  assert.deepEqual(sent.at(-1).payload, { commentId: "r1", ancestors: ["c5"] },
+    "返信の返信は、外側の親から順に添えて頼む")
+  assert.equal(container.querySelectorAll("li").length, 4, "コメント＋返信＋その返信2件")
 })

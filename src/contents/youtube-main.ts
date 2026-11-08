@@ -1178,10 +1178,13 @@ const replyLoadsInFlight = new Map<string, Promise<ReplyLoadResult>>()
 /** 先読みの直列化。「開始」だけを直列にし、ユーザーのクリックはこの列を待たない。 */
 let replyPrefetchChain: Promise<unknown> = Promise.resolve()
 
-function loadRepliesShared(commentId: string): Promise<ReplyLoadResult> {
+function loadRepliesShared(
+  commentId: string,
+  ancestors: readonly string[] = []
+): Promise<ReplyLoadResult> {
   const inFlight = replyLoadsInFlight.get(commentId)
   if (inFlight) return inFlight
-  const run = loadRepliesDetailed(commentId).finally(() => replyLoadsInFlight.delete(commentId))
+  const run = loadRepliesDetailed(commentId, ancestors).finally(() => replyLoadsInFlight.delete(commentId))
   replyLoadsInFlight.set(commentId, run)
   return run
 }
@@ -1193,12 +1196,15 @@ function loadRepliesShared(commentId: string): Promise<ReplyLoadResult> {
  *   クリックされたスレッドが先読み待ちでも、クリック側は即座に開始し、先読み側は
  *   後から同じ結果（既に展開済み → 即返却）を得る。
  */
-function prefetchReplies(commentId: string): Promise<ReplyLoadResult> {
+function prefetchReplies(
+  commentId: string,
+  ancestors: readonly string[] = []
+): Promise<ReplyLoadResult> {
   const inFlight = replyLoadsInFlight.get(commentId)
   if (inFlight) return inFlight
   const run = replyPrefetchChain.then(() => {
     if (ports.size === 0) return { items: [], reason: "not-found" as const }
-    return loadRepliesShared(commentId)
+    return loadRepliesShared(commentId, ancestors)
   })
   replyPrefetchChain = run.catch(() => undefined)
   return run
@@ -1208,7 +1214,35 @@ function prefetchReplies(commentId: string): Promise<ReplyLoadResult> {
  * 返信一覧と、空だった場合の理由を返す。理由はPopoutがそのまま表示し、
  * 「なぜ取れなかったか」を切り分けられるようにする（診断機能と同じ思想）。
  */
-async function loadRepliesDetailed(commentId: string): Promise<ReplyLoadResult> {
+/**
+ * 目的の返信をメイン画面のDOMへ呼び戻す。既に居るなら何もしない。
+ *
+ * ★ 2026-11-08 実測（watchページ・返信14件のスレッド）: 返信を展開すると、返信は1件ずつ
+ *   `yt-sub-thread > div > ytd-comment-thread-renderer` に包まれ、その中の `#replies` に
+ *   「返信への返信」がぶら下がる。つまり「14件の返信」のうち直下は5件で、残り9件は
+ *   その5件の内側にいる（サブ画面が出す「返信 3件」はこの入れ子の実数）。
+ *   この入れ子は**親が展開されている間しかDOMに無い**。メイン画面を読み込み直したり、
+ *   YouTubeがスレッド要素を作り直したりすると丸ごと消える（読み込み直後の実測で
+ *   返信のview-modelは0件になる）。一方サブ画面は返信の行を状態として持ち続けるので、
+ *   そこで「返信 3件」を押すと not-found になり、何度押しても直らなかった
+ *   （ユーザー報告「返信が表示されない」）。
+ * サブ画面が親の並び（外側→内側）を一緒に送ってくるので、外側から順に展開し直す。
+ */
+async function reviveCommentPath(commentId: string, ancestors: readonly string[]): Promise<void> {
+  for (let i = 0; i < ancestors.length; i++) {
+    if (findCommentElementById(commentId)) return
+    const ancestorId = ancestors[i]
+    if (!ancestorId || ancestorId === commentId) continue
+    // その祖先自身も消えていることがある。さらに外側だけを渡して同じ手順を踏ませる。
+    // 渡す列は必ず短くなるので、この入れ子は必ず終わる。
+    await loadRepliesShared(ancestorId, ancestors.slice(0, i))
+  }
+}
+
+async function loadRepliesDetailed(
+  commentId: string,
+  ancestors: readonly string[] = []
+): Promise<ReplyLoadResult> {
   // ★ トップレベルでも返信でも、「自身の返信欄を持つスレッド要素」に揃えてから扱う。
   //   返信への返信（新スレッドUI）はこれだけで再帰的に読めるようになる。
   //   要素の参照はSPA遷移や再描画で容易に無効になるため、毎回idから引き直す。
@@ -1217,9 +1251,14 @@ async function loadRepliesDetailed(commentId: string): Promise<ReplyLoadResult> 
     return el ? resolveOwnThread(el) : null
   }
 
+  // メイン画面が作り直されて返信が消えていたら、親を外側から開き直して呼び戻す。
+  if (ancestors.length > 0 && !findCommentElementById(commentId)) {
+    await reviveCommentPath(commentId, ancestors)
+  }
+
   const thread = findOwnThread()
   if (!thread) {
-    // 見つからない（SPA遷移・再描画）か、返信欄を持たない（旧UIの裸の返信）
+    // 見つからない（親ごと一覧から消えた）か、返信欄を持たない（旧UIの裸の返信）
     return { items: [], reason: findCommentElementById(commentId) ? "no-reply-thread" : "not-found" }
   }
 
@@ -2996,8 +3035,10 @@ registerHandlers({
       ...(likeCount !== undefined ? { likeCount } : {})
     }
   },
-  COMMENT_LOAD_REPLIES: async ({ commentId, prefetch }) =>
-    prefetch ? prefetchReplies(commentId) : loadRepliesShared(commentId),
+  COMMENT_LOAD_REPLIES: async ({ commentId, ancestors, prefetch }) =>
+    prefetch
+      ? prefetchReplies(commentId, ancestors ?? [])
+      : loadRepliesShared(commentId, ancestors ?? []),
   COMMENT_POST: async ({ text: body }) => {
     const videoId = getVideoId()
     const container = findCommentSection(videoId)

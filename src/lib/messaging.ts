@@ -49,7 +49,7 @@ export interface QueueItem {
 
 /**
  * 返信を空で返したときの理由。診断用の短いコードで、Popout がそのまま画面に出す。
- * - not-found:       指定idのコメントが現在のコメント欄に見つからない
+ * - not-found:       指定idのコメントが現在のコメント欄に見つからない（親を展開し直しても）
  * - no-reply-thread: 見つかったが自身の返信欄を持たない（旧UIの包まれていない返信）
  * - no-toggle:       展開ボタンが見つからず、返信も現れなかった
  * - timeout:         展開したが、待ち時間内に返信が現れなかった（YouTube側の遅延）
@@ -202,8 +202,12 @@ export type Contract = {
   // ★ prefetch: true は「サブ画面で行が見えたので先回りして準備する」要求。CS側は先読みを
   //   1件ずつ直列に処理し（並走すると continuation の nudge が祖先スタイルを取り合う）、
   //   ユーザーのクリック（prefetch なし）は待たずに即実行、同じidが処理中なら結果を共有する。
+  // ★ ancestors は「この返信にたどり着くまでに開く必要がある親」を外側から順に並べたもの。
+  //   返信はメイン画面で親が展開されている間しかDOMに無く、メイン画面が読み込み直されると
+  //   消える。サブ画面は返信の行を持ち続けるため、これが無いと以後ずっと not-found になる
+  //   （2026-11-08 ユーザー報告「返信が表示されない」）。トップレベルのコメントでは空。
   COMMENT_LOAD_REPLIES: {
-    req: { commentId: string; prefetch?: boolean }
+    req: { commentId: string; ancestors?: string[]; prefetch?: boolean }
     res: { items: FeedItem[]; reason?: ReplyLoadFailure }
   }
   // 新規コメントの投稿。成功すればコメント本体の自動監視(FEED_APPEND)が
