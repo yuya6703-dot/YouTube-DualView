@@ -216,7 +216,15 @@ export type Contract = {
   }
   // 新規コメントの投稿。成功すればコメント本体の自動監視(FEED_APPEND)が
   // 自然に新着として拾うため、ここでは成否だけ返す。
-  COMMENT_POST: { req: { text: string };              res: { ok: boolean } }
+  // ★ videoId は「この下書きを書いた動画」。メイン画面はいま開いている動画と突き合わせ、
+  //   違えば投稿しない。これが無いと、下書きを書いたあとに動画が変わった場合
+  //   （サブ画面から関連動画を選ぶ・キューの自動送り・メイン画面側の自動再生）、
+  //   CS側は「いま開いている動画」へそのまま公開投稿してしまう。
+  //   公開・取り消し不能な操作なので、取り違えは絶対に起こさない。
+  COMMENT_POST: {
+    req: { text: string; videoId: string }
+    res: { ok: boolean; reason?: "video-changed" }
+  }
   // 返信の投稿。返信は自動監視の対象外（COMMENT_LOAD_REPLIESと同じくオンデマンド取得）
   // なので、投稿後の最新の返信一覧をこちらから返してPopout側の状態を更新させる。
   COMMENT_REPLY: { req: { commentId: string; text: string }; res: { ok: boolean; items: FeedItem[] } }

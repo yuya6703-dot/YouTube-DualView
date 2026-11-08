@@ -300,6 +300,10 @@ export default function Popout() {
 
   // 新規コメントの投稿。投稿自体の反映は既存のコメント自動監視(FEED_APPEND)に任せる
   const [newCommentText, setNewCommentText] = useState("")
+  // ★ その下書きを「どの動画あてに書き始めたか」。動画が変わっても下書きは残るため
+  //   （消すとユーザーの書いた文章を失う）、投稿時にこれと今の動画を突き合わせる。
+  //   評価・共有欄が key={currentVideoId} で持ち越さないのと同じ考え方。
+  const [draftVideoId, setDraftVideoId] = useState<string | null>(null)
   const [newCommentPosting, setNewCommentPosting] = useState(false)
   const [newCommentError, setNewCommentError] = useState<string | null>(null)
 
@@ -614,26 +618,43 @@ export default function Popout() {
     requestMoreRelated
   )
 
+  // 下書きの入力。書き始めた時点の動画を覚え、空にしたら忘れる。
+  const changeNewComment = (value: string) => {
+    setNewCommentText(value)
+    if (!value.trim()) setDraftVideoId(null)
+    else if (draftVideoId === null) setDraftVideoId(currentVideoId)
+  }
+
   // ★ 投稿の失敗を黙って捨てない。メイン画面が未ログイン・投稿欄が無効化されている等、
   //   CS側が ok:false を返す経路は現実に複数ある。何も出さないと「押したのに反応しない」
   //   だけの状態になり、原因の切り分けが一切できなくなる。
   const postNewComment = async () => {
     if (tabId === null || newCommentPosting) return
     const body = newCommentText.trim()
-    if (!body) return
+    if (!body || !currentVideoId) return
+    // ★ 書き始めた動画と今の動画が違うなら、一度止めて知らせる。文章は消さない。
+    //   知らせたうえで今の動画へ結び直すので、もう一度押せば「今の動画」へ投稿される
+    //   （取り違えには必ず一度の警告と、分かったうえでの二度目の操作が要る）。
+    if (draftVideoId !== null && draftVideoId !== currentVideoId) {
+      setDraftVideoId(currentVideoId)
+      setNewCommentError(t.errVideoChanged)
+      return
+    }
     setNewCommentPosting(true)
     setNewCommentError(null)
-    const res = await askContent(tabId, "COMMENT_POST", { text: body })
+    const res = await askContent(tabId, "COMMENT_POST", { text: body, videoId: currentVideoId })
     setNewCommentPosting(false)
     if (isErr(res)) {
       setNewCommentError(t.errCommMain)
       return
     }
     if (!res.data.ok) {
-      setNewCommentError(t.errPostFailed)
+      setNewCommentError(res.data.reason === "video-changed" ? t.errVideoChanged : t.errPostFailed)
+      if (res.data.reason === "video-changed") setDraftVideoId(currentVideoId)
       return
     }
     setNewCommentText("")
+    setDraftVideoId(null)
   }
 
   const [searchQuery, setSearchQuery] = useState("")
@@ -886,7 +907,7 @@ export default function Popout() {
                 </p>
                 <NewCommentComposer
                   value={newCommentText}
-                  onChange={setNewCommentText}
+                  onChange={changeNewComment}
                   onSubmit={() => void postNewComment()}
                   posting={newCommentPosting}
                   disabled={tabId === null}
@@ -924,7 +945,7 @@ export default function Popout() {
               </p>
               <NewCommentComposer
                 value={newCommentText}
-                onChange={setNewCommentText}
+                onChange={changeNewComment}
                 onSubmit={() => void postNewComment()}
                 posting={newCommentPosting}
                 disabled={tabId === null}
@@ -1241,7 +1262,7 @@ export default function Popout() {
                 {commentsOpen && (
                   <NewCommentComposer
                     value={newCommentText}
-                    onChange={setNewCommentText}
+                    onChange={changeNewComment}
                     onSubmit={() => void postNewComment()}
                     posting={newCommentPosting}
                     disabled={tabId === null}

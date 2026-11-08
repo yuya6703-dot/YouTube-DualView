@@ -189,7 +189,7 @@ test("post-comment initialization only targets the selected current section", as
   let currentClicks = 0
   h.doc.querySelector("#comments button").addEventListener("click", () => oldClicks++)
   h.doc.querySelector("ytd-comments[engagement-panel] button").addEventListener("click", () => currentClicks++)
-  const pending = h.handlers.COMMENT_POST({ text: "test" })
+  const pending = h.handlers.COMMENT_POST({ text: "test", videoId: "current" })
   await h.advance(1200)
   const result = await pending
   assert.equal(result.ok, false, "no editor or submit action is present in this fixture")
@@ -1325,4 +1325,35 @@ test("a nested thread's own toggle is used, never an outer thread's", async (t) 
     commentId: "lc:parent.r1", ancestors: ["lc:parent"]
   }))
   assert.deepEqual(order, ["parent", "parent.r1"], "押したのは各スレッド自身のトグルだけ")
+})
+
+// ---- 下書きの投稿先の取り違え（v87） ----
+//
+// ★ COMMENT_POST は本文しか運んでおらず、CS側は「いま開いている動画」へ投稿していた。
+//   下書きを書いたあとに動画が変わる経路（サブ画面から関連動画を選ぶ・キューの自動送り・
+//   メイン画面側の自動再生）は普通に起きるため、前の動画あての文章が別の動画へ
+//   公開投稿され得た。公開・取り消し不能な操作なので、必ず突き合わせる。
+test("a comment written for another video is never posted into the one now on screen", async (t) => {
+  const trigger = '<div id="simple-box"><button id="simplebox-placeholder">Add a comment</button></div>'
+  const h = setup(t, section(trigger))
+  let placeholderClicks = 0
+  h.doc.querySelector("#simplebox-placeholder").addEventListener("click", () => placeholderClicks++)
+
+  const result = await settle(h, h.handlers.COMMENT_POST({ text: "video A へのコメント", videoId: "other" }))
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, "video-changed")
+  assert.equal(placeholderClicks, 0, "投稿欄にはいっさい触れない（開きかけもしない）")
+})
+
+test("a comment written for the video on screen still goes through the normal path", async (t) => {
+  const trigger = '<div id="simple-box"><button id="simplebox-placeholder">Add a comment</button></div>'
+  const h = setup(t, section(trigger))
+  let placeholderClicks = 0
+  h.doc.querySelector("#simplebox-placeholder").addEventListener("click", () => placeholderClicks++)
+
+  const result = await settle(h, h.handlers.COMMENT_POST({ text: "いまの動画へ", videoId: "current" }))
+  // この fixture には本物の入力欄が無いので投稿自体は失敗するが、
+  // 取り違えではないので通常の経路（投稿欄を開きにいく）までは進む。
+  assert.equal(result.reason, undefined, "動画が一致していれば video-changed にはしない")
+  assert.equal(placeholderClicks, 1, "通常どおり投稿欄を開きにいく")
 })

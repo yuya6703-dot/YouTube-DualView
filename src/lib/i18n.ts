@@ -127,6 +127,7 @@ export interface Dictionary {
   replyPostedNoticeNoRefresh: string
   errCommMain: string
   errPostFailed: string
+  errVideoChanged: string
   errReplyFailed: string
 
   // 診断
@@ -301,6 +302,7 @@ const ja: Dictionary = {
   replyPostedNoticeNoRefresh: "返信を投稿しました（一覧の再取得はできませんでした）",
   errCommMain: "メイン画面と通信できませんでした。YouTubeタブを再読み込みしてください。",
   errPostFailed: "投稿できませんでした。メイン画面でログインしているか確認してください。",
+  errVideoChanged: "動画が変わりました。この下書きは前の動画あてです。今の動画に投稿してよければ、もう一度押してください。",
   errReplyFailed: "返信できませんでした。メイン画面でログインしているか確認してください。",
 
   diagSummary: (v, ok, all, samples) =>
@@ -470,6 +472,7 @@ const en: Dictionary = {
   replyPostedNoticeNoRefresh: "Reply posted (couldn't refresh the list)",
   errCommMain: "Couldn't reach the main tab. Try reloading the YouTube tab.",
   errPostFailed: "Couldn't post. Check that you're logged in on the main tab.",
+  errVideoChanged: "The video changed. This draft was written for the previous one — press again to post it on the current video.",
   errReplyFailed: "Couldn't reply. Check that you're logged in on the main tab.",
 
   diagSummary: (v, ok, all, samples) =>

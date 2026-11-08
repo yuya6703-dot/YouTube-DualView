@@ -244,6 +244,7 @@ async function subWindow() {
             if (env.action === "DOM_FETCH_GUIDE") return { ok: true, data: smokeGuide }
             if (env.action === "GUIDE_ACTIVATE") return { ok: true, data: { ok: true, guide: smokeGuide } }
             if (env.action === "COMMENT_LOAD_REPLIES") return { ok: true, data: replyAnswer }
+            if (env.action === "COMMENT_POST") return { ok: true, data: { ok: true } }
             return { ok: true, data: {} }
           },
           create: async () => ({})
@@ -376,8 +377,49 @@ async function subWindow() {
     "E: 返信の返信は、外側の親から順に添えて頼む")
   assert.ok(doc.body.textContent.includes("Comment c1.r1.a"), "E: 返信への返信が並ぶ")
 
+  // 下書きの投稿先の取り違え（v87）。公開・取り消し不能な操作なので、配布物でも必ず見る。
+  // ★ 下書きを書いたあとに動画が変わっても、黙って「いまの動画」へ投稿してはいけない。
+  const composer = doc.querySelector("textarea[placeholder='コメントを追加']")
+  assert.ok(composer, "E: コメントの投稿欄がある")
+  const typeInto = (el, text) => {
+    const setValue = Object.getOwnPropertyDescriptor(win.HTMLTextAreaElement.prototype, "value").set
+    setValue.call(el, text)
+    el.dispatchEvent(new win.Event("input", { bubbles: true }))
+  }
+  typeInto(composer, "動画Aへ書いた下書き")
+  await wait(300)
+  const postButton = () => [...doc.querySelectorAll("button")].find((b) => b.textContent.trim() === "投稿")
+  assert.ok(postButton(), "E: 本文を入れると投稿ボタンが出る")
+
+  // メイン画面の動画が変わる（関連動画の選択・キューの自動送り・自動再生のいずれでも起きる）
+  toSubWindow({ type: "VIDEO_CHANGED", payload: { videoId: "bbbbbbbbbbb", kind: "video" } })
+  toSubWindow({ type: "STATUS", payload: {
+    videoId: "bbbbbbbbbbb", title: "Video B", channelName: "Channel Y", rating: null,
+    channel: { subscribed: false }, channelAvatarUrl: "", channelSubscribers: "",
+    currentTime: 0, duration: 100, volume: 50, muted: false, playbackRate: 1,
+    paused: true, ended: false, kind: "video", sampledAt: Date.now()
+  } })
+  await wait(500)
+
+  const postsBefore = toMainWindow.filter((env) => env.action === "COMMENT_POST").length
+  postButton().dispatchEvent(new win.MouseEvent("click", { bubbles: true }))
+  await wait(400)
+  assert.equal(toMainWindow.filter((env) => env.action === "COMMENT_POST").length, postsBefore,
+    "E: 動画が変わったあとの一度目は投稿しない")
+  assert.ok(doc.body.textContent.includes("動画が変わりました"), "E: 取り違えをユーザーに知らせる")
+  assert.ok(doc.querySelector("textarea[placeholder='コメントを追加']").value.includes("動画Aへ書いた下書き"),
+    "E: 書いた文章は消さない")
+
+  // 知らせたうえで、もう一度押したら「いまの動画」へ投稿する
+  postButton().dispatchEvent(new win.MouseEvent("click", { bubbles: true }))
+  await wait(400)
+  const posted = toMainWindow.filter((env) => env.action === "COMMENT_POST").at(-1)
+  assert.deepEqual(JSON.parse(JSON.stringify(posted?.payload ?? null)),
+    { text: "動画Aへ書いた下書き", videoId: "bbbbbbbbbbb" },
+    "E: 二度目は、いまの動画を明示して投稿する")
+
   console.log("E サブ画面               →", JSON.stringify(panes.map((p) => p.querySelector("p")?.textContent.trim())),
-    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持 / チャンネル名と登録ボタン: あり / サイドバー: 再現 / 返信の返信: 親を添えて要求 / 件数不明の返信: 開ける")
+    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持 / チャンネル名と登録ボタン: あり / サイドバー: 再現 / 返信の返信: 親を添えて要求 / 件数不明の返信: 開ける / 下書きの投稿先: 取り違えない")
   win.close()
 }
 

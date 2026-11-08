@@ -3109,8 +3109,12 @@ registerHandlers({
     prefetch
       ? prefetchReplies(commentId, ancestors ?? [])
       : loadRepliesShared(commentId, ancestors ?? []),
-  COMMENT_POST: async ({ text: body }) => {
+  COMMENT_POST: async ({ text: body, videoId: intended }) => {
     const videoId = getVideoId()
+    // ★ 下書きを書いた動画と、いま開いている動画が違うなら投稿しない。
+    //   サブ画面側でも止めているが、送信から処理までの隙にも動画は変わり得るので
+    //   ここでも必ず突き合わせる（公開・取り消し不能な操作のため二重に守る）。
+    if (videoId !== intended) return { ok: false, reason: "video-changed" as const }
     const container = findCommentSection(videoId)
     if (!container) return { ok: false }
     let box = q<HTMLElement>(SELECTORS.comments.commentBox, container)
