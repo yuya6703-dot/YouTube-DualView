@@ -477,6 +477,31 @@ async function subWindow() {
   win.close()
 }
 
+/**
+ * F: プレイヤーを作り直している最中は、ページのスタイルに触らない。
+ *
+ * ★ 報告「サブで関連動画から動画再生するときに画面が全く映らない時がある」。
+ *   サブ画面から関連動画を選ぶとメイン画面はSPA遷移でプレイヤーを作り直すため、
+ *   その一瞬 #movie_player が居なくなる。nudge の安全装置は
+ *   `player && ...` という形だったため player が null だと素通りし、
+ *   ytd-watch-flexy ごと display/overflow/contain を強制変更していた。
+ *   そこへプレイヤーが戻ると内部のサイズ計算が壊れ、映像が真っ暗なまま復帰しない。
+ */
+async function playerBeingRebuilt() {
+  const h = boot('<div id="below"><ytd-comments id="comments"><ytd-item-section-renderer>' +
+    '<div id="contents"><ytd-continuation-item-renderer is-initial-load></ytd-continuation-item-renderer></div>' +
+    '</ytd-item-section-renderer></ytd-comments></div>', { withPlayer: false })
+  await sleep(2500) // 本来ならこの間に nudge が走る
+  const flexy = h.doc.querySelector("ytd-watch-flexy")
+  const below = h.doc.querySelector("#below")
+  const continuation = h.doc.querySelector("ytd-continuation-item-renderer")
+  assert.equal(flexy.getAttribute("style"), null, "F: プレイヤーの祖先に触らない")
+  assert.equal(below.getAttribute("style"), null, "F: その内側の祖先にも触らない")
+  assert.equal(continuation.getAttribute("style"), null, "F: 対象そのものにも触らない")
+  console.log("F プレイヤー作り直し中 → ページのスタイルに触らない")
+  h.win.close()
+}
+
 ;(async () => {
   console.log(`配布物: v${manifest.version} / ${csFile}`)
   await stagedHydration()
@@ -484,6 +509,7 @@ async function subWindow() {
   await stalePreviousVideo()
   await videoRating()
   await subWindow()
+  await playerBeingRebuilt()
   console.log("DIST SMOKE OK")
   process.exit(0)
 })().catch((error) => {

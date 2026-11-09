@@ -1833,3 +1833,55 @@ test("a failed unsubscribe says what it saw, so a different build can be diagnos
   assert.match(res.detail, /yt-sheet-view-model/, "どのダイアログを見たかが分かる")
   assert.doesNotMatch(res.detail, /登録解除|キャンセル/, "ページの文章は載せない")
 })
+
+// ---- プレイヤーを作り直している最中は、ページに触らない（v93） ----
+//
+// ★ 報告「サブで関連動画から動画再生するときに画面が全く映らない時がある」。
+//   サブ画面から関連動画を選ぶとメイン画面はSPA遷移でプレイヤーを作り直すため、
+//   その一瞬 #movie_player が居なくなる。nudgeIntoViewport の安全装置その2は
+//   `player && parent.contains(player)` という形なので、player が null だと**素通り**し、
+//   ytd-watch-flexy や #columns まで display/overflow/contain を強制変更していた。
+//   そこへプレイヤーが戻ると内部のサイズ計算が壊れ、映像が真っ暗なまま復帰しない
+//   （2026-08-19 に記録した現象と同じで、player が null の場合だけ穴が残っていた）。
+const withoutAvatars = (ids) =>
+  ids.map((id) => thread(id).replace('<img src="https://yt3.ggpht.com/avatar.jpg">', "<img>")).join("")
+
+test("while the player is being rebuilt, nothing on the page is restyled", async (t) => {
+  const h = setup(t, section(withoutAvatars(["a", "b"])))
+  h.start()
+  // 作り直しの最中（#movie_player が一瞬居ない）
+  h.doc.querySelector("#movie_player").remove()
+  const flexy = h.doc.querySelector("ytd-watch-flexy")
+  const below = h.doc.querySelector("#below")
+
+  await h.advance(600) // 本来ならここでアイコンの nudge が走る
+
+  assert.equal(flexy.getAttribute("style"), null, "プレイヤーの祖先に触らない")
+  assert.equal(below.getAttribute("style"), null, "その内側の祖先にも触らない")
+  assert.equal(
+    [...h.doc.querySelectorAll("#author-thumbnail")].filter((el) => el.style.position === "fixed").length,
+    0,
+    "プレイヤーの居場所が分からないうちは箱も作らない"
+  )
+})
+
+test("skipping the nudge does not stall the loader; it resumes once the player is back", async (t) => {
+  // ★ 見送るときも done() を呼ばないと、呼び出し側のリトライ連鎖がそこで止まってしまう。
+  //   プレイヤーが戻ったら通常どおり読み込みが進むこと。
+  const h = setup(t, section(continuation))
+  // ★ 監視を始める前に外す（SPA遷移の最中にコメント欄の監視が動き出す状況の再現）
+  const player = h.doc.querySelector("#movie_player")
+  player.remove()
+  h.start()
+  await h.advance(3000)
+  const cont = h.doc.querySelector("ytd-continuation-item-renderer")
+  assert.equal(cont.getAttribute("style"), null, "居ない間は continuation にも触らない")
+  assert.equal(h.doc.querySelector("ytd-watch-flexy").getAttribute("style"), null)
+
+  h.doc.querySelector("ytd-watch-flexy").prepend(player)
+  await h.advance(4000)
+  assert.ok(
+    h.doc.querySelector("ytd-continuation-item-renderer").getAttribute("style"),
+    "戻ったら読み込みが再開する（待ち続けない）"
+  )
+})

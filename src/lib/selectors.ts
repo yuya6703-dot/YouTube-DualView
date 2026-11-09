@@ -743,7 +743,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 92
+export const DIAGNOSE_VERSION = 93
 
 export type DiagnoseReport = {
   v: number

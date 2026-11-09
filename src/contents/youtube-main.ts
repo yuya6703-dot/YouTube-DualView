@@ -2025,8 +2025,18 @@ function nudgeIntoViewport(el: HTMLElement, done: () => void, dwellMs = 700) {
   //   YouTube自身のプレイヤーが内部で持つサイズ計算が壊れ、
   //   スタイルを元に戻しても映像が真っ暗なまま復帰しないことがある。
   const player = q<HTMLElement>(SELECTORS.player.root)
-  if (player && el.contains(player)) {
-    done() // 何もせず次の試行に委ねる（呼び出し側のリトライで自然に回復する）
+  // ★ プレイヤーが**見つからないときも**何もしない。
+  //   安全装置その2（unclipAncestors）は `player && parent.contains(player)` という形なので、
+  //   player が null だと**まるごと素通り**し、ytd-watch-flexy や #columns まで
+  //   display/overflow/contain を強制変更してしまう。
+  //   サブ画面から関連動画を選ぶとメイン画面はSPA遷移でプレイヤーを作り直すため、
+  //   その一瞬 #movie_player が居なくなる。ちょうどそこで nudge が始まると祖先を触り、
+  //   戻ってきたプレイヤーの内部のサイズ計算が壊れて**映像が真っ暗なまま復帰しない**
+  //   （報告「サブで関連動画から動画再生するときに画面が全く映らない時がある」。
+  //   2026-08-19 に記録した現象と同じで、player が null の場合だけ穴が残っていた）。
+  //   触らなければ交差判定に失敗するだけで、呼び出し側のリトライで自然に回復する。
+  if (!player || el.contains(player)) {
+    done()
     return
   }
 
@@ -2195,7 +2205,14 @@ function nudgeBatchCapacity(): number {
  */
 function nudgeManyIntoViewport(targets: HTMLElement[], done: () => void, dwellMs: number) {
   const player = q<HTMLElement>(SELECTORS.player.root)
-  const fresh = targets.filter((el) => !(player && el.contains(player)) && !activeNudges.has(el))
+  // ★ 単体の nudgeIntoViewport と同じ理由で、プレイヤーが見つからないときは何もしない。
+  //   player が null だと unclipAncestors の安全装置が素通りし、ytd-watch-flexy ごと
+  //   強制変更してしまう（映像が真っ暗なまま復帰しなくなる）。
+  if (!player) {
+    done()
+    return
+  }
+  const fresh = targets.filter((el) => !el.contains(player) && !activeNudges.has(el))
   if (fresh.length === 0) {
     done()
     return
