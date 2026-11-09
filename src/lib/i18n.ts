@@ -97,6 +97,10 @@ export interface Dictionary {
   subscribed: string
   subscribedHint: string
   errSubscribeFailed: string
+  /** 登録解除の確認（1回目の押下で出す） */
+  unsubscribeConfirm: string
+  unsubscribeConfirmHint: string
+  errUnsubscribeFailed: string
   share: string
   shareAndCopy: string
   shareStartAt: (time: string) => string
@@ -281,6 +285,9 @@ const ja: Dictionary = {
   subscribed: "登録済み",
   subscribedHint: "登録済み（解除はメイン画面から）",
   errSubscribeFailed: "チャンネル登録を反映できませんでした",
+  unsubscribeConfirm: "解除しますか？",
+  unsubscribeConfirmHint: "もう一度押すとチャンネル登録を解除します",
+  errUnsubscribeFailed: "登録を解除できませんでした。メイン画面で操作してください。",
   share: "共有",
   shareAndCopy: "共有リンクをコピー",
   shareStartAt: (time) => `この位置から共有（${time}）`,
@@ -459,6 +466,9 @@ const en: Dictionary = {
   subscribed: "Subscribed",
   subscribedHint: "Subscribed (unsubscribe from the main window)",
   errSubscribeFailed: "YouTube did not apply the subscription",
+  unsubscribeConfirm: "Unsubscribe?",
+  unsubscribeConfirmHint: "Press again to unsubscribe from this channel",
+  errUnsubscribeFailed: "Couldn't unsubscribe. Please do it on the main tab.",
   share: "Share",
   shareAndCopy: "Copy share link",
   shareStartAt: (time) => `Share from ${time}`,

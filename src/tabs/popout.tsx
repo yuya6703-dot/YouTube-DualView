@@ -1628,20 +1628,36 @@ function VideoActions({
   }
 
   const [subscribeBusy, setSubscribeBusy] = useState(false)
+  // ★ 解除は取り消しにくいので、1回目の押下では確認に変えるだけにする（誤タップ防止）。
+  //   VideoActions は key={currentVideoId} で作り直されるため、動画が変われば自然に戻る。
+  const [confirmingUnsubscribe, setConfirmingUnsubscribe] = useState(false)
   const [subscribeError, setSubscribeError] = useState<string | null>(null)
 
   /**
-   * チャンネル登録。★登録済みのときは何もしない。YouTube は登録済みのボタンを押すと
-   * 「登録を解除」を含むメニューを開くため、サブ画面からは押させない（CS側でも弾いている）。
+   * チャンネル登録ボタン。未登録なら登録、登録済みなら解除。
+   *
+   * ★ 登録と解除は CS 側でも**別の要求**にしてある。同じ要求で兼ねると「登録したいだけ」の
+   *   操作が解除の入口になり得るため（v80 から守っている性質）。
+   * ★ 解除は取り消しにくいので、1回目の押下では確認に変えるだけにし、
+   *   分かったうえでの2回目で実行する（下書きの投稿先 v87 と同じ型）。
    */
-  const subscribe = async () => {
-    if (tabId === null || subscribeBusy || !channel || channel.subscribed) return
+  const toggleSubscribe = async () => {
+    if (tabId === null || subscribeBusy || !channel) return
+    if (channel.subscribed && !confirmingUnsubscribe) {
+      setSubscribeError(null)
+      setConfirmingUnsubscribe(true)
+      return
+    }
+    const unsubscribing = channel.subscribed
     setSubscribeBusy(true)
     setSubscribeError(null)
-    const res = await askContent(tabId, "CHANNEL_SUBSCRIBE", undefined)
+    const res = await askContent(tabId, unsubscribing ? "CHANNEL_UNSUBSCRIBE" : "CHANNEL_SUBSCRIBE", undefined)
     setSubscribeBusy(false)
+    setConfirmingUnsubscribe(false)
     if (isErr(res)) setSubscribeError(t.errCommMain)
-    else if (!res.data.applied) setSubscribeError(t.errSubscribeFailed)
+    else if (!res.data.applied) {
+      setSubscribeError(unsubscribing ? t.errUnsubscribeFailed : t.errSubscribeFailed)
+    }
   }
 
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle")
@@ -1699,17 +1715,31 @@ function VideoActions({
         </div>
         {channel && (
           <button
-            onClick={() => void subscribe()}
-            disabled={tabId === null || subscribeBusy || channel.subscribed}
-            aria-label={channel.subscribed ? t.subscribed : t.subscribe}
-            title={channel.subscribed ? t.subscribedHint : t.subscribe}
-            className={`${pillButton} rounded-full ${
+            onClick={() => void toggleSubscribe()}
+            disabled={tabId === null || subscribeBusy}
+            aria-label={
               channel.subscribed
-                ? "bg-neutral-800 text-neutral-400"
-                : "bg-neutral-100 text-neutral-900 hover:bg-white active:scale-95"
+                ? (confirmingUnsubscribe ? t.unsubscribeConfirm : t.subscribed)
+                : t.subscribe
+            }
+            title={
+              channel.subscribed
+                ? (confirmingUnsubscribe ? t.unsubscribeConfirmHint : t.subscribedHint)
+                : t.subscribe
+            }
+            className={`${pillButton} rounded-full ${
+              confirmingUnsubscribe && channel.subscribed
+                ? "bg-red-600 text-white hover:bg-red-500 active:scale-95"
+                : channel.subscribed
+                  ? "bg-neutral-800 text-neutral-400 hover:bg-neutral-700 active:scale-95"
+                  : "bg-neutral-100 text-neutral-900 hover:bg-white active:scale-95"
             }`}>
-            {channel.subscribed ? <Check size={14} /> : <Plus size={14} />}
-            {channel.subscribed ? t.subscribed : t.subscribe}
+            {channel.subscribed
+              ? (confirmingUnsubscribe ? <X size={14} /> : <Check size={14} />)
+              : <Plus size={14} />}
+            {channel.subscribed
+              ? (confirmingUnsubscribe ? t.unsubscribeConfirm : t.subscribed)
+              : t.subscribe}
           </button>
         )}
         {rating && (

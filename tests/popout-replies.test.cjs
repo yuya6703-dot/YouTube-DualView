@@ -313,15 +313,35 @@ test("pressing subscribe asks the main window to subscribe", async (t) => {
   assert.deepEqual(sent.at(-1), { tabId: 7, action: "CHANNEL_SUBSCRIBE", payload: undefined })
 })
 
-// 登録済みのボタンを押すと YouTube は解除メニューを開く。サブ画面からは押させない
-test("an already-subscribed channel shows the state without offering a press", async (t) => {
+// ★ 解除は取り消しにくいので、1回目の押下では確認に変えるだけ。分かったうえでの2回目で実行する
+//   （要望「登録済みのボタンから登録解除できるようにしてほしい」/ v90）。
+test("one press on a subscribed channel only asks; it never unsubscribes", async (t) => {
   const { button, press } = await renderActions(t, { channelName: "Channel X", channel: { subscribed: true } })
   const subscribed = button("登録済み")
   assert.ok(subscribed, "the state is shown")
-  assert.equal(subscribed.disabled, true, "but it cannot be pressed")
+  assert.equal(subscribed.disabled, false, "and it can be pressed now")
+
   const before = sent.length
   await press(subscribed)
-  assert.equal(sent.length, before, "nothing is sent to the main window")
+  assert.equal(sent.length, before, "the first press sends nothing to the main window")
+  assert.ok(button("解除しますか？"), "it turns into a confirmation instead")
+})
+
+test("the second press is what actually unsubscribes", async (t) => {
+  respond = () => ({ ok: true, data: { channel: { subscribed: false }, applied: true } })
+  const { button, press } = await renderActions(t, { channelName: "Channel X", channel: { subscribed: true } })
+  await press(button("登録済み"))
+  await press(button("解除しますか？"))
+  assert.deepEqual(sent.at(-1), { tabId: 7, action: "CHANNEL_UNSUBSCRIBE", payload: undefined },
+    "解除は登録とは別の要求（登録要求が解除の入口にならない性質を保つ）")
+})
+
+test("a failed unsubscribe says so instead of pretending it worked", async (t) => {
+  respond = () => ({ ok: true, data: { channel: { subscribed: true }, applied: false } })
+  const { container, button, press } = await renderActions(t, { channelName: "Channel X", channel: { subscribed: true } })
+  await press(button("登録済み"))
+  await press(button("解除しますか？"))
+  assert.match(container.textContent, /登録を解除できませんでした/)
 })
 
 test("without a subscribe button on the main window the sub window offers none", async (t) => {

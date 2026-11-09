@@ -253,6 +253,9 @@ async function subWindow() {
             if (env.action === "GUIDE_ACTIVATE") return { ok: true, data: { ok: true, guide: smokeGuide } }
             if (env.action === "COMMENT_LOAD_REPLIES") return { ok: true, data: replyAnswer }
             if (env.action === "COMMENT_POST") return { ok: true, data: { ok: true } }
+            if (env.action === "CHANNEL_UNSUBSCRIBE") {
+              return { ok: true, data: { channel: { subscribed: false }, applied: true } }
+            }
             if (env.action === "DOM_FETCH_COMMENT_SORT") return { ok: true, data: sortAnswer }
             if (env.action === "COMMENT_SORT_SELECT") {
               sortAnswer = {
@@ -446,8 +449,31 @@ async function subWindow() {
     { id: "o1", label: "新しい順" }, "E: メイン画面の同じ項目を押させる")
   assert.equal(sortButton("新しい順").getAttribute("aria-pressed"), "true", "E: 切り替わった並びを反映する")
 
+  // 登録解除（v90）。★ 取り消しにくい操作なので、1回の押下では絶対に実行しない。
+  toSubWindow({ type: "STATUS", payload: {
+    videoId: "bbbbbbbbbbb", title: "Video B", channelName: "Channel Y", rating: null,
+    channel: { subscribed: true }, channelAvatarUrl: "", channelSubscribers: "",
+    currentTime: 0, duration: 100, volume: 50, muted: false, playbackRate: 1,
+    paused: true, ended: false, kind: "video", sampledAt: Date.now()
+  } })
+  await wait(400)
+  const labelled = (txt) => [...doc.querySelectorAll("button")].find((b) => b.textContent.trim() === txt)
+  assert.ok(labelled("登録済み"), "E: 登録済みが出る")
+  const unsubBefore = toMainWindow.filter((env) => env.action === "CHANNEL_UNSUBSCRIBE").length
+  labelled("登録済み").dispatchEvent(new win.MouseEvent("click", { bubbles: true }))
+  await wait(300)
+  assert.equal(toMainWindow.filter((env) => env.action === "CHANNEL_UNSUBSCRIBE").length, unsubBefore,
+    "E: 一度目の押下では解除しない")
+  assert.ok(labelled("解除しますか？"), "E: 確認に変わる")
+  labelled("解除しますか？").dispatchEvent(new win.MouseEvent("click", { bubbles: true }))
+  await wait(400)
+  assert.equal(toMainWindow.filter((env) => env.action === "CHANNEL_UNSUBSCRIBE").length, unsubBefore + 1,
+    "E: 二度目で解除を頼む")
+  assert.ok(!toMainWindow.some((env) => env.action === "CHANNEL_SUBSCRIBE"),
+    "E: 解除は登録とは別の要求（登録要求が解除の入口にならない）")
+
   console.log("E サブ画面               →", JSON.stringify(panes.map((p) => p.querySelector("p")?.textContent.trim())),
-    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持 / チャンネル名と登録ボタン: あり / サイドバー: 再現 / 返信の返信: 親を添えて要求 / 件数不明の返信: 開ける / 下書きの投稿先: 取り違えない / コメントの並び替え: 切り替わる")
+    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持 / チャンネル名と登録ボタン: あり / サイドバー: 再現 / 返信の返信: 親を添えて要求 / 件数不明の返信: 開ける / 下書きの投稿先: 取り違えない / コメントの並び替え: 切り替わる / 登録解除: 二段階")
   win.close()
 }
 

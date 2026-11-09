@@ -1521,3 +1521,128 @@ test("a sort option that moved is found again by its label", async (t) => {
   assert.equal(res.ok, true)
   assert.deepEqual(pressed, ["新しい順"], "位置がズレていても文言で引き直す")
 })
+
+// ---- チャンネル登録の解除（v90） ----
+//
+// ★ 2026-11-10 実測: 登録済みのボタンを押すと ytd-popup-container の中に
+//   tp-yt-paper-listbox#items が作られ、ytd-menu-service-item-renderer が4つ並ぶ
+//   （すべて / カスタマイズされた通知のみ / なし / 登録解除）。区切りもグループも無く、
+//   aria-selected は通知側で一貫しない。文言は言語依存。よって**最後の項目**でしか
+//   見分けられないため、危うさは呼び出し側の3つの仕掛けで埋めている。
+/** 既存の subscribeArea（実機に忠実）に、メニューの置き場所だけ足す。 */
+const subscribePage = (subscribed) =>
+  subscribeArea({ subscribed }) + "<ytd-popup-container></ytd-popup-container>"
+
+const unsubscribeMenu = (extraLast = "") => `
+  <tp-yt-iron-dropdown><ytd-menu-popup-renderer>
+    <tp-yt-paper-listbox id="items">
+      <ytd-menu-service-item-renderer aria-selected="true">すべて</ytd-menu-service-item-renderer>
+      <ytd-menu-service-item-renderer aria-selected="false" is-selected>カスタマイズされた通知のみ</ytd-menu-service-item-renderer>
+      <ytd-menu-service-item-renderer aria-selected="false">なし</ytd-menu-service-item-renderer>
+      <ytd-menu-service-item-renderer aria-selected="false">登録解除</ytd-menu-service-item-renderer>
+      ${extraLast}
+    </tp-yt-paper-listbox>
+  </ytd-menu-popup-renderer></tp-yt-iron-dropdown>`
+
+/** 登録済みのボタンを押すとメニューが開く YouTube を再現する。 */
+function stubSubscribeMenu(h, { onUnsubscribe, extraLast = "" } = {}) {
+  const host = h.doc.querySelector("ytd-subscribe-button-renderer")
+  const popup = h.doc.querySelector("ytd-popup-container")
+  const pressed = []
+  host.querySelector("button").addEventListener("click", () => {
+    popup.innerHTML = unsubscribeMenu(extraLast)
+    for (const item of popup.querySelectorAll("ytd-menu-service-item-renderer")) {
+      item.addEventListener("click", () => {
+        pressed.push(item.textContent.trim())
+        if (item.textContent.trim() === "登録解除") onUnsubscribe?.(host, popup)
+      })
+    }
+  })
+  return pressed
+}
+
+test("unsubscribing presses YouTube's own menu item and reports the result", async (t) => {
+  const h = setup(t, subscribePage(true))
+  h.start()
+  // ダイアログを出さない世代: その場で subscribed が外れる
+  const pressed = stubSubscribeMenu(h, { onUnsubscribe: (host) => host.removeAttribute("subscribed") })
+  const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
+  assert.equal(res.applied, true)
+  assert.equal(res.channel.subscribed, false)
+  assert.deepEqual(pressed, ["登録解除"], "押したのは最後の項目だけ（通知設定には触れない）")
+})
+
+// ★ 確認ダイアログが出る世代（実機未確認のため、出る側・出ない側の両方を検査で固定する）
+test("a confirmation dialog, if YouTube shows one, is confirmed and the result verified", async (t) => {
+  const h = setup(t, subscribePage(true))
+  h.start()
+  const popup = h.doc.querySelector("ytd-popup-container")
+  stubSubscribeMenu(h, {
+    onUnsubscribe: (host) => {
+      popup.insertAdjacentHTML("beforeend", `
+        <yt-confirm-dialog-renderer>
+          <div id="cancel-button"><button>キャンセル</button></div>
+          <div id="confirm-button"><button>登録解除</button></div>
+        </yt-confirm-dialog-renderer>`)
+      popup.querySelector("#confirm-button button").addEventListener("click", () => {
+        host.removeAttribute("subscribed")
+      })
+    }
+  })
+  const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
+  assert.equal(res.applied, true, "ダイアログが出たら押して、最後は属性で成否を見る")
+  assert.equal(res.channel.subscribed, false)
+})
+
+test("a channel that is not subscribed is never touched by the unsubscribe request", async (t) => {
+  const h = setup(t, subscribePage(false))
+  h.start()
+  const pressed = stubSubscribeMenu(h)
+  const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
+  assert.equal(res.applied, false)
+  assert.deepEqual(pressed, [], "解除の要求が登録の入口になってはいけない")
+})
+
+// ★ 位置頼みの危うさを埋める仕掛け。最後が「選択中の通知設定」なら押さない。
+test("the last menu item is left alone when it is the active notification setting", async (t) => {
+  const h = setup(t, subscribePage(true))
+  h.start()
+  const pressed = stubSubscribeMenu(h, {
+    extraLast: '<ytd-menu-service-item-renderer aria-selected="false" is-selected>別の通知設定</ytd-menu-service-item-renderer>'
+  })
+  const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
+  assert.equal(res.applied, false)
+  assert.deepEqual(pressed, [], "見覚えのない並びなら何も押さない")
+  assert.equal(h.doc.querySelector("ytd-subscribe-button-renderer").hasAttribute("subscribed"), true)
+})
+
+test("an unsubscribe that does not take effect is reported as not applied", async (t) => {
+  const h = setup(t, subscribePage(true))
+  h.start()
+  // 押しても YouTube が何もしない（未ログイン等）
+  const pressed = stubSubscribeMenu(h)
+  const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
+  assert.equal(res.applied, false, "属性が変わらなければ成功にしない")
+  assert.equal(res.channel.subscribed, true)
+  assert.deepEqual(pressed, ["登録解除"])
+})
+
+// ★ メイン画面は全画面視聴中のことがある。失敗してメニューを開いたままにすると映像を覆う。
+test("a failed unsubscribe closes whatever it opened", async (t) => {
+  const h = setup(t, subscribePage(true))
+  h.start()
+  let escapes = 0
+  h.doc.addEventListener("keydown", (e) => { if (e.key === "Escape") escapes++ })
+  stubSubscribeMenu(h)
+  await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
+  assert.ok(escapes > 0, "開いたメニューを閉じる")
+})
+
+test("subscribing still refuses to touch an already-subscribed channel", async (t) => {
+  const h = setup(t, subscribePage(true))
+  h.start()
+  const pressed = stubSubscribeMenu(h)
+  const res = await settle(h, h.handlers.CHANNEL_SUBSCRIBE())
+  assert.equal(res.applied, false)
+  assert.deepEqual(pressed, [], "登録の要求は解除の入口にならない（v80 からの性質）")
+})

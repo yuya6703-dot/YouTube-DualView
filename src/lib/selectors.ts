@@ -69,7 +69,32 @@ export const SELECTORS = {
       "ytd-watch-metadata #subscribe-button ytd-subscribe-button-renderer button",
       "ytd-watch-metadata ytd-subscribe-button-renderer button",
       "#owner ytd-subscribe-button-renderer button"
-    ]
+    ],
+    // 登録済みのボタンを押すと開くメニュー。
+    // ★ 2026-11-10 実測（登録済みのチャンネル）: 押して初めて
+    //   `ytd-popup-container > tp-yt-iron-dropdown > ytd-menu-popup-renderer >
+    //   tp-yt-paper-listbox#items` が作られ、`ytd-menu-service-item-renderer` が4つ並ぶ:
+    //   「すべて」「カスタマイズされた通知のみ」「なし」「登録解除」。
+    // ★ **区切りもグループも無く4つとも同じリストの兄弟**で、`aria-selected` は
+    //   通知側で一貫しない（「すべて」が true なのに、実際の選択中は「カスタマイズ」の
+    //   `is-selected`）。文言は言語で変わるので見ない。つまり登録解除は
+    //   **位置（最後の項目）でしか見分けられない**。危うさは呼び出し側で埋める
+    //   （自分のクリックで開いたメニューだけを読む／選択中の通知設定は押さない／
+    //   最後に subscribed 属性が消えたかで成否を判定する）。
+    subscribeMenu: [
+      "ytd-popup-container tp-yt-iron-dropdown ytd-menu-popup-renderer",
+      "ytd-popup-container ytd-menu-popup-renderer"
+    ],
+    subscribeMenuItem: [
+      "tp-yt-paper-listbox#items > ytd-menu-service-item-renderer",
+      "#items > ytd-menu-service-item-renderer",
+      "ytd-menu-service-item-renderer"
+    ],
+    // 解除の確認ダイアログ。★ **実機未確認**（確認まで進めるとユーザーのアカウントで
+    //   実際に解除が走るため測っていない）。出る世代と出ない世代の両方を扱えるよう、
+    //   「出たら押す」「出なければ属性の変化を待つ」の両対応にしてある。
+    confirmDialog: ["yt-confirm-dialog-renderer", "tp-yt-paper-dialog[opened]"],
+    confirmDialogConfirm: ["#confirm-button button", "#confirm-button", "yt-button-shape#confirm-button button"]
   },
 
   related: {
@@ -690,7 +715,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 89
+export const DIAGNOSE_VERSION = 90
 
 export type DiagnoseReport = {
   v: number

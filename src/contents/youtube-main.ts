@@ -2990,6 +2990,25 @@ const GUIDE_DRAWER_OPEN_TIMEOUT_MS = 1500
 const GUIDE_ENTRIES_TIMEOUT_MS = 4000
 /** 並び替えが効くまでの待ち。実測では500ms以内に aria-selected が入れ替わった。 */
 const COMMENT_SORT_TIMEOUT_MS = 3000
+/** 登録解除のメニューが開くまでの待ち。 */
+const UNSUBSCRIBE_MENU_TIMEOUT_MS = 2000
+/** 解除が反映されるまでの試行回数（1回 = 125ms）。確認ダイアログの分も含めて余裕を持たせる。 */
+const UNSUBSCRIBE_ATTEMPTS = 24
+
+/**
+ * 自分が開いたメニューやダイアログを閉じる。
+ * ★ メイン画面は全画面視聴中のことがあるので、失敗しても開いたままにしない。
+ *   Polymer の iron-dropdown / paper-dialog は Escape で閉じる。
+ */
+function dismissOpenOverlay() {
+  const overlay =
+    q<HTMLElement>(SELECTORS.meta.confirmDialog) ??
+    q<HTMLElement>(SELECTORS.meta.subscribeMenu) ??
+    null
+  const event = () => new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true })
+  overlay?.dispatchEvent(event())
+  document.dispatchEvent(event())
+}
 const GUIDE_AVATAR_TIMEOUT_MS = 2000
 /** 閉じるアニメーション（YouTube側のinline styleで200ms）が終わるまで透明のままにする */
 const GUIDE_CLOSE_SETTLE_MS = 300
@@ -3312,6 +3331,78 @@ registerHandlers({
     ;(q<HTMLElement>(SELECTORS.guide.entryLink, entry) ?? entry).click()
     await delay(400)
     return { ok: true, guide: readGuide() }
+  },
+  CHANNEL_UNSUBSCRIBE: async () => {
+    const videoId = getVideoId()
+    const before = readChannelState()
+    const button = q<HTMLElement>(SELECTORS.meta.subscribeButton)
+    // ★ 登録していないなら何もしない。CHANNEL_SUBSCRIBE が「登録済みなら押さない」のと対で、
+    //   こちらが登録の入口になることも防ぐ。
+    if (
+      !before ||
+      !before.subscribed ||
+      !button ||
+      button.matches(":disabled, [disabled], [aria-disabled='true']")
+    ) {
+      return { channel: before, applied: false }
+    }
+
+    // ★ 自分のクリックで新しく開いたメニューだけを読む。たまたま別のメニューが
+    //   開いていても、それを操作しないため。
+    const menuBefore = q<HTMLElement>(SELECTORS.meta.subscribeMenu)
+    button.click()
+    const opened = await waitUntil(() => {
+      const menu = q<HTMLElement>(SELECTORS.meta.subscribeMenu)
+      return menu !== null && menu !== menuBefore && qa(SELECTORS.meta.subscribeMenuItem, menu).length > 0
+    }, UNSUBSCRIBE_MENU_TIMEOUT_MS)
+    const menu = q<HTMLElement>(SELECTORS.meta.subscribeMenu)
+    if (!opened || !menu || menu === menuBefore) {
+      dismissOpenOverlay()
+      return { channel: readChannelState(), applied: false }
+    }
+
+    // ★ 登録解除は**最後の項目**でしか見分けられない（区切りもグループも無く、
+    //   aria-selected は通知側で一貫しない。文言は言語依存なので見ない）。
+    //   せめて「選択中の通知設定を押してしまう」事故だけは防ぐ。
+    const items = qa<HTMLElement>(SELECTORS.meta.subscribeMenuItem, menu)
+    const target = items[items.length - 1]
+    if (
+      !target ||
+      target.hasAttribute("is-selected") ||
+      target.getAttribute("aria-selected") === "true"
+    ) {
+      dismissOpenOverlay()
+      return { channel: readChannelState(), applied: false }
+    }
+    target.click()
+
+    // ★ 確認ダイアログが出る世代と出ない世代の両方を扱う（ダイアログ側は実機未確認）。
+    //   出たら押し、出なければ属性の変化を待つ。どちらでも最後は
+    //   「subscribed が消えたか」だけで成否を決める。
+    let applied = false
+    let confirmed = false
+    for (let attempt = 0; attempt < UNSUBSCRIBE_ATTEMPTS && !applied; attempt++) {
+      await new Promise((resolve) => window.setTimeout(resolve, 125))
+      if (getVideoId() !== videoId) break
+      if (readChannelState()?.subscribed === false) {
+        applied = true
+        break
+      }
+      if (!confirmed) {
+        const dialog = q<HTMLElement>(SELECTORS.meta.confirmDialog)
+        const confirm = dialog && q<HTMLElement>(SELECTORS.meta.confirmDialogConfirm, dialog)
+        if (confirm && !confirm.matches(":disabled, [disabled], [aria-disabled='true']")) {
+          confirm.click()
+          confirmed = true
+        }
+      }
+    }
+
+    // ★ 失敗したときに開いたままにしない。メイン画面は全画面視聴中のことがあり、
+    //   メニューやダイアログが残ると映像を覆ってしまう。
+    if (!applied) dismissOpenOverlay()
+    pushStatus()
+    return { channel: readChannelState(), applied }
   },
   CHANNEL_SUBSCRIBE: async () => {
     const videoId = getVideoId()
