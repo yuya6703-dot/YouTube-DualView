@@ -7,6 +7,8 @@
  */
 import type { PlasmoCSConfig } from "plasmo"
 import {
+  type CommentSortOption,
+  type CommentSortState,
   PORT_PLAYER,
   STATUS_INTERVAL_MS,
   registerHandlers,
@@ -2921,8 +2923,73 @@ function seekAfterNavigation(videoId: string, seconds: number, generation: numbe
  * ★ 一度組み立てれば閉じてもDOMに残り、SPA遷移をまたいで生きる。だから起動は1回でよい。
  * ========================================================== */
 
+/** 選択肢の表示名。専用の要素が無いDOM世代では1行目で代用する。 */
+function commentSortLabel(el: Element): string {
+  const own = text(SELECTORS.commentSort.optionLabel, el)
+  if (own) return own
+  return (el.textContent ?? "").trim().split("\n")[0]?.trim() ?? ""
+}
+
+/**
+ * コメントの並び替えの選択肢を読む。
+ *
+ * ★ 2026-11-09 実測: 選択肢は**メニューを開かなくても既にDOMにある**
+ *   （`tp-yt-paper-listbox` の中の `<a aria-selected>`）。開く必要が無いので、
+ *   サイドバー(v84)のような「見えないように開いて戻す」細工は要らない。
+ * ★ 選択状態は `aria-selected`。文言（人気順／新しい順）は**表示用にそのまま運ぶだけ**で、
+ *   判定には使わない（表示言語に依存しないため）。
+ */
+function readCommentSort(): CommentSortState {
+  const container = findCommentSection(getVideoId())
+  const root = container && q<HTMLElement>(SELECTORS.commentSort.root, container)
+  if (!root) return { available: false, options: [] }
+  const options: CommentSortOption[] = []
+  qa(SELECTORS.commentSort.option, root).forEach((el, index) => {
+    const label = commentSortLabel(el)
+    if (!label) return
+    options.push({
+      id: `o${index}`,
+      label,
+      hint: text(SELECTORS.commentSort.optionHint, el),
+      selected: el.getAttribute("aria-selected") === "true"
+    })
+  })
+  return options.length > 0 ? { available: true, options } : { available: false, options: [] }
+}
+
+/** 並び替えの選択肢の要素を引く。位置で引き、ズレていたら文言で引き直す（サイドバーと同じ）。 */
+function findCommentSortElement(request: { id: string; label: string }): HTMLElement | null {
+  const container = findCommentSection(getVideoId())
+  const root = container && q<HTMLElement>(SELECTORS.commentSort.root, container)
+  if (!root) return null
+  const elements = qa<HTMLElement>(SELECTORS.commentSort.option, root)
+  const index = Number(request.id.replace(/^o/, ""))
+  const byPosition = Number.isInteger(index) ? elements[index] : undefined
+  if (byPosition && commentSortLabel(byPosition) === request.label) return byPosition
+  return elements.find((el) => commentSortLabel(el) === request.label) ?? byPosition ?? null
+}
+
+/**
+ * 並び替えたあとのコメント欄を、動画が変わったときと同じように作り直す。
+ *
+ * ★ 2026-11-09 実測: 並び替えても YouTube は `ytd-comment-thread-renderer` を
+ *   **使い回して中身だけ書き換える**（旧要素20件がDOMに残り、idも18件が重複した）。
+ *   既読集合（seenCommentIds）を抱えたままだと、入れ替わった並びを「既に見た」として
+ *   捨ててしまい、サブ画面は古い順序のまま止まる。watchComments(true, ...) が
+ *   既読集合を作り直すので、feed も一緒にリセットして配信し直す。
+ */
+function restartCommentFeed() {
+  commentItemCache = new Map()
+  commentPageState = initialPageState("comment")
+  emit({ type: "FEED_RESET", payload: { kind: "comment" } })
+  emit({ type: "PAGE_STATE", payload: commentPageState })
+  watchComments(true, false)
+}
+
 const GUIDE_DRAWER_OPEN_TIMEOUT_MS = 1500
 const GUIDE_ENTRIES_TIMEOUT_MS = 4000
+/** 並び替えが効くまでの待ち。実測では500ms以内に aria-selected が入れ替わった。 */
+const COMMENT_SORT_TIMEOUT_MS = 3000
 const GUIDE_AVATAR_TIMEOUT_MS = 2000
 /** 閉じるアニメーション（YouTube側のinline styleで200ms）が終わるまで透明のままにする */
 const GUIDE_CLOSE_SETTLE_MS = 300
@@ -3213,6 +3280,22 @@ registerHandlers({
     // 一時停止中は STATUS が流れないため、ここで送ってサブ画面の表示を実態へ合わせる
     pushStatus()
     return { rating: readVideoRating(), applied }
+  },
+  DOM_FETCH_COMMENT_SORT: async () => readCommentSort(),
+  COMMENT_SORT_SELECT: async (request) => {
+    const target = findCommentSortElement(request)
+    if (!target) return { ok: false, sort: readCommentSort() }
+    if (target.getAttribute("aria-selected") === "true") {
+      return { ok: true, sort: readCommentSort() } // 既にその並び。押さない
+    }
+    target.click()
+    const applied = await waitUntil(
+      () => target.getAttribute("aria-selected") === "true",
+      COMMENT_SORT_TIMEOUT_MS
+    )
+    if (!applied) return { ok: false, sort: readCommentSort() }
+    restartCommentFeed()
+    return { ok: true, sort: readCommentSort() }
   },
   DOM_FETCH_GUIDE: async () => {
     await ensureGuide()

@@ -26,11 +26,14 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import {
   DEFAULT_RELATED_DISPLAY_SIZE,
   DEFAULT_SETTINGS,
+  EMPTY_COMMENT_SORT,
   EMPTY_GUIDE,
   LOCAL_KEYS,
   askContent,
   isRelatedDisplaySize,
   isErr,
+  type CommentSortOption,
+  type CommentSortState,
   type DiagnoseReport,
   type FeedItem,
   type GuideEntry,
@@ -278,6 +281,9 @@ export default function Popout() {
   const [guideError, setGuideError] = useState<string | null>(null)
 
   const [commentFontSize, setCommentFontSize] = useState<CommentFontSize>("sm")
+  // コメントの並び替え。選択肢も現在値もメイン画面から読む（文言はYouTubeのものをそのまま出す）
+  const [commentSort, setCommentSort] = useState<CommentSortState>(EMPTY_COMMENT_SORT)
+  const [commentSortBusy, setCommentSortBusy] = useState(false)
   const [relatedDisplaySize, setRelatedDisplaySize] = useState<RelatedDisplaySize>(
     DEFAULT_RELATED_DISPLAY_SIZE
   )
@@ -460,6 +466,28 @@ export default function Popout() {
   }
 
   const currentVideoId = status?.videoId ?? null
+
+  // 並び替えの選択肢を取りに行く。動画が変わるとコメント欄ごと作り直されるので取り直す。
+  useEffect(() => {
+    if (tabId === null) return
+    let cancelled = false
+    void (async () => {
+      const res = await askContent(tabId, "DOM_FETCH_COMMENT_SORT", undefined)
+      if (!cancelled) setCommentSort(isErr(res) ? EMPTY_COMMENT_SORT : res.data)
+    })()
+    return () => { cancelled = true }
+  }, [tabId, currentVideoId])
+
+  // ★ 切り替えはメイン画面のメニュー項目をそのまま押させる（URLも並び順も自前で作らない）。
+  //   メイン画面側は押したあと feed を作り直して配信し直すので、ここでは結果を受け取るだけ。
+  const selectCommentSort = async (option: CommentSortOption) => {
+    if (tabId === null || commentSortBusy || option.selected) return
+    setCommentSortBusy(true)
+    const res = await askContent(tabId, "COMMENT_SORT_SELECT", { id: option.id, label: option.label })
+    setCommentSortBusy(false)
+    if (!isErr(res)) setCommentSort(res.data.sort)
+  }
+
   const currentNotes = currentVideoId ? notesByVideo[currentVideoId] ?? [] : []
 
   /** ＋ボタン押下時点の再生位置を凍結してメモ入力欄を開く */
@@ -915,6 +943,7 @@ export default function Popout() {
                   t={t}
                 />
                 <div className="shrink-0">
+                  <CommentSortControl sort={commentSort} busy={commentSortBusy} onSelect={selectCommentSort} t={t} />
                   <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} t={t} />
                 </div>
               </div>
@@ -953,7 +982,8 @@ export default function Popout() {
                 t={t}
               />
               <div className="flex shrink-0 items-center gap-2">
-                <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} t={t} />
+                <CommentSortControl sort={commentSort} busy={commentSortBusy} onSelect={selectCommentSort} t={t} />
+                  <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} t={t} />
                 <button
                   onClick={() => setCommentsFullscreen(false)}
                   className="flex items-center gap-1 rounded bg-neutral-800 px-2.5 py-1.5 text-[11px] text-neutral-300 transition hover:bg-neutral-700 active:scale-95">
@@ -1272,7 +1302,10 @@ export default function Popout() {
                 )}
                 <div className="ml-auto flex shrink-0 items-center gap-2">
                   {commentsOpen && feed.length > 0 && (
-                    <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} t={t} />
+                    <>
+                      <CommentSortControl sort={commentSort} busy={commentSortBusy} onSelect={selectCommentSort} t={t} />
+                      <FontSizeControl value={commentFontSize} onChange={updateCommentFontSize} t={t} />
+                    </>
                   )}
                   {feed.length > 0 && (
                     <button
@@ -2413,6 +2446,39 @@ function NewCommentComposer({ value, onChange, onSubmit, posting, disabled, erro
         )}
       </div>
       {error && <p className="mt-1 text-[10px] leading-snug text-red-400">{error}</p>}
+    </div>
+  )
+}
+
+/**
+ * コメントの並び替え。選択肢の文言はYouTubeの表示をそのまま出す（自前で訳さない）。
+ * 選択肢が1つ以下なら、押せるものが無いので何も出さない。
+ */
+function CommentSortControl({ sort, busy, onSelect, t }: {
+  sort: CommentSortState
+  busy: boolean
+  onSelect: (option: CommentSortOption) => void
+  t: Dictionary
+}) {
+  if (!sort.available || sort.options.length < 2) return null
+  return (
+    <div className="flex items-center overflow-hidden rounded border border-neutral-700" aria-label={t.sortLabel}>
+      {sort.options.map((option) => (
+        <button
+          key={option.id}
+          onClick={() => onSelect(option)}
+          disabled={busy}
+          title={option.hint || undefined}
+          aria-pressed={option.selected}
+          aria-label={t.sortOptionLabel(option.label)}
+          className={`px-1.5 py-1 text-[10px] transition disabled:opacity-40 ${
+            option.selected
+              ? "bg-neutral-700 text-neutral-100"
+              : "text-neutral-500 hover:bg-neutral-800"
+          }`}>
+          {option.label}
+        </button>
+      ))}
     </div>
   )
 }

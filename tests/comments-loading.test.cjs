@@ -1412,3 +1412,112 @@ test("a reply count written in English is read as the real number", async (t) =>
   await h.advance(1200)
   assert.equal(Array.from(h.api.items())[0].replyCount, 1200)
 })
+
+// ---- コメントの並び替え（v89） ----
+//
+// ★ 2026-11-09 実測: 選択肢はメニューを開かなくても DOM にあり（tp-yt-paper-listbox の
+//   <a aria-selected>）、直接 click() で切り替わる。ドロップダウンは非表示のままなので
+//   メイン画面には何も出ない。現在値は aria-selected で分かる（文言は見ない）。
+const SORT_LABELS = ["人気順", "新しい順"]
+const SORT_HINTS = ["注目のコメントを表示", "最近のコメントを表示します"]
+const sortMenu = (selectedIndex = 0) => `
+  <ytd-comments-header-renderer><div id="title"><div id="additional-section">
+    <span id="sort-menu"><yt-sort-filter-sub-menu-renderer><yt-dropdown-menu>
+      <tp-yt-paper-menu-button><tp-yt-paper-listbox id="menu">
+        ${SORT_LABELS.map((label, i) => `
+        <a aria-selected="${i === selectedIndex}"><tp-yt-paper-item><tp-yt-paper-item-body>
+          <div id="item-with-badge"><div class="item">${label}</div></div>
+          <div id="subtitle">${SORT_HINTS[i]}</div>
+        </tp-yt-paper-item-body></tp-yt-paper-item></a>`).join("")}
+      </tp-yt-paper-listbox></tp-yt-paper-menu-button>
+    </yt-dropdown-menu></yt-sort-filter-sub-menu-renderer></span>
+  </div></div></ytd-comments-header-renderer>`
+
+// 実測どおり、ヘッダーは #contents の兄弟（#header の中）に置く
+const sectionWithSort = (threads, selectedIndex = 0) => `
+  <ytd-comments id="comments"><ytd-item-section-renderer>
+    <div id="header">${sortMenu(selectedIndex)}</div>
+    <div id="contents">${threads}</div>
+  </ytd-item-section-renderer></ytd-comments>`
+
+const sortOptions = (h) => [...h.doc.querySelectorAll("tp-yt-paper-listbox a[aria-selected]")]
+
+test("the sub window is told which sort options YouTube offers and which one is active", async (t) => {
+  const h = setup(t, sectionWithSort(thread("a") + thread("b")))
+  h.start()
+  await h.advance(1200)
+  const sort = await settle(h, h.handlers.DOM_FETCH_COMMENT_SORT())
+  assert.equal(sort.available, true)
+  assert.deepEqual(Array.from(sort.options, (o) => o.label), SORT_LABELS, "YouTubeの文言をそのまま運ぶ")
+  assert.deepEqual(Array.from(sort.options, (o) => o.selected), [true, false], "選択はaria-selected由来")
+  assert.deepEqual(Array.from(sort.options, (o) => o.hint), SORT_HINTS, "説明も添える")
+})
+
+test("no sort control is reported when YouTube does not offer one", async (t) => {
+  const h = setup(t, section(thread("a")))
+  h.start()
+  await h.advance(1200)
+  const sort = await settle(h, h.handlers.DOM_FETCH_COMMENT_SORT())
+  assert.equal(sort.available, false)
+  assert.equal(sort.options.length, 0)
+})
+
+// ★ 並び替えると YouTube は ytd-comment-thread-renderer を**使い回して中身だけ書き換える**
+//   （2026-11-09 実測: 旧要素20件がDOMに残り、idも18件が重複）。既読集合を抱えたままだと
+//   入れ替わった並びを「既に見た」として捨ててしまうので、feed を作り直す必要がある。
+test("switching the sort rebuilds the feed, so the new order actually reaches the sub window", async (t) => {
+  const h = setup(t, sectionWithSort(thread("a") + thread("b")))
+  h.start()
+  await h.advance(1200)
+  assert.deepEqual(Array.from(h.api.items(), (i) => i.id), ["lc:a", "lc:b"])
+
+  // YouTube を再現: 押すと aria-selected が入れ替わり、既存要素の中身が書き換わる（順序が逆に）
+  const [popular, newest] = sortOptions(h)
+  newest.addEventListener("click", () => {
+    popular.setAttribute("aria-selected", "false")
+    newest.setAttribute("aria-selected", "true")
+    const contents = h.doc.querySelector("ytd-comments #contents")
+    contents.innerHTML = thread("b") + thread("a") // 同じidを逆順で（要素は作り直されるが id は重複）
+  })
+
+  const before = h.events.length
+  const res = await settle(h, h.handlers.COMMENT_SORT_SELECT({ id: "o1", label: "新しい順" }))
+  assert.equal(res.ok, true)
+  assert.deepEqual(Array.from(res.sort.options, (o) => o.selected), [false, true], "選択が移る")
+
+  const after = h.events.slice(before)
+  assert.ok(after.some((e) => e.type === "FEED_RESET" && e.payload.kind === "comment"),
+    "サブ画面の一覧を作り直させる")
+
+  await h.advance(2000)
+  assert.deepEqual(Array.from(h.api.items(), (i) => i.id), ["lc:b", "lc:a"],
+    "既読集合を抱えたままだとここが古い順序のままになる")
+})
+
+test("choosing the sort that is already active does not touch YouTube's menu", async (t) => {
+  const h = setup(t, sectionWithSort(thread("a")))
+  h.start()
+  await h.advance(1200)
+  let clicks = 0
+  for (const a of sortOptions(h)) a.addEventListener("click", () => clicks++)
+  const res = await settle(h, h.handlers.COMMENT_SORT_SELECT({ id: "o0", label: "人気順" }))
+  assert.equal(res.ok, true)
+  assert.equal(clicks, 0, "既にその並びなら押さない（押すと無駄に読み直しが走る）")
+})
+
+test("a sort option that moved is found again by its label", async (t) => {
+  const h = setup(t, sectionWithSort(thread("a")))
+  h.start()
+  await h.advance(1200)
+  const pressed = []
+  for (const a of sortOptions(h)) {
+    a.addEventListener("click", () => {
+      pressed.push((a.querySelector("#item-with-badge .item")?.textContent ?? "").trim())
+      for (const b of sortOptions(h)) b.setAttribute("aria-selected", String(b === a))
+    })
+  }
+  // 位置は o0 と言われているが、その位置にあるのは「人気順」。求めているのは「新しい順」
+  const res = await settle(h, h.handlers.COMMENT_SORT_SELECT({ id: "o0", label: "新しい順" }))
+  assert.equal(res.ok, true)
+  assert.deepEqual(pressed, ["新しい順"], "位置がズレていても文言で引き直す")
+})

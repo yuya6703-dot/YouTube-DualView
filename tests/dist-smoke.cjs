@@ -201,6 +201,14 @@ async function subWindow() {
   let toSubWindow = null
   // COMMENT_LOAD_REPLIES にどう答えるか。入れ子の返信を試すため途中で差し替える
   let replyAnswer = { items: [] }
+  // コメントの並び替え。文言は YouTube のものをそのまま運ぶ契約
+  let sortAnswer = {
+    available: true,
+    options: [
+      { id: "o0", label: "人気順", hint: "注目のコメントを表示", selected: true },
+      { id: "o1", label: "新しい順", hint: "最近のコメントを表示します", selected: false }
+    ]
+  }
   const noop = () => {}
   const dom = new JSDOM(popoutHtml.replace(/<script[^>]*><\/script>/, ""), {
     url: "chrome-extension://smoke/tabs/popout.html", runScripts: "outside-only", pretendToBeVisual: true,
@@ -245,6 +253,14 @@ async function subWindow() {
             if (env.action === "GUIDE_ACTIVATE") return { ok: true, data: { ok: true, guide: smokeGuide } }
             if (env.action === "COMMENT_LOAD_REPLIES") return { ok: true, data: replyAnswer }
             if (env.action === "COMMENT_POST") return { ok: true, data: { ok: true } }
+            if (env.action === "DOM_FETCH_COMMENT_SORT") return { ok: true, data: sortAnswer }
+            if (env.action === "COMMENT_SORT_SELECT") {
+              sortAnswer = {
+                available: true,
+                options: sortAnswer.options.map((o) => ({ ...o, selected: o.id === env.payload.id }))
+              }
+              return { ok: true, data: { ok: true, sort: sortAnswer } }
+            }
             return { ok: true, data: {} }
           },
           create: async () => ({})
@@ -418,8 +434,20 @@ async function subWindow() {
     { text: "動画Aへ書いた下書き", videoId: "bbbbbbbbbbb" },
     "E: 二度目は、いまの動画を明示して投稿する")
 
+  // コメントの並び替え（v89）。選択肢の文言はメイン画面から来たものをそのまま出す。
+  const sortButton = (label) => [...doc.querySelectorAll("button")].find((b) => b.textContent.trim() === label)
+  assert.ok(toMainWindow.some((env) => env.action === "DOM_FETCH_COMMENT_SORT"), "E: 並び替えを取りに行く")
+  assert.ok(sortButton("人気順") && sortButton("新しい順"), "E: YouTubeの文言のまま選択肢を出す")
+  assert.equal(sortButton("人気順").getAttribute("aria-pressed"), "true", "E: いまの並びが分かる")
+  sortButton("新しい順").dispatchEvent(new win.MouseEvent("click", { bubbles: true }))
+  await wait(400)
+  const sortSent = toMainWindow.filter((env) => env.action === "COMMENT_SORT_SELECT").at(-1)
+  assert.deepEqual(JSON.parse(JSON.stringify(sortSent?.payload ?? null)),
+    { id: "o1", label: "新しい順" }, "E: メイン画面の同じ項目を押させる")
+  assert.equal(sortButton("新しい順").getAttribute("aria-pressed"), "true", "E: 切り替わった並びを反映する")
+
   console.log("E サブ画面               →", JSON.stringify(panes.map((p) => p.querySelector("p")?.textContent.trim())),
-    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持 / チャンネル名と登録ボタン: あり / サイドバー: 再現 / 返信の返信: 親を添えて要求 / 件数不明の返信: 開ける / 下書きの投稿先: 取り違えない")
+    "/ 共有:", JSON.stringify(copied.slice(0, 2)), "/ 連続コピーの表示: 維持 / チャンネル名と登録ボタン: あり / サイドバー: 再現 / 返信の返信: 親を添えて要求 / 件数不明の返信: 開ける / 下書きの投稿先: 取り違えない / コメントの並び替え: 切り替わる")
   win.close()
 }
 

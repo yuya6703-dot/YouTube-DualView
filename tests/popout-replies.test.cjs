@@ -56,7 +56,7 @@ function load(relative, extra = "") {
 }
 const { DEFAULT_SETTINGS } = load("src/lib/messaging.ts")
 const { getDictionary } = load("src/lib/i18n.ts")
-const { testing } = load("src/tabs/popout.tsx", "\nexport const testing = { CommentRow, RelatedRow, PagingTail, VideoActions, GuidePanel }\n")
+const { testing } = load("src/tabs/popout.tsx", "\nexport const testing = { CommentRow, RelatedRow, PagingTail, VideoActions, GuidePanel, CommentSortControl }\n")
 
 const comment = (id, replyCount) => ({
   id, author: `Author ${id}`, avatarUrl: "", text: `Comment ${id}`,
@@ -493,4 +493,65 @@ test("like counts are shown the way that language shows them", async (t) => {
 test("an unknown like count shows nothing rather than a zero", async (t) => {
   const container = await renderWithDict(t, comment("lcNone"), "ja")
   assert.doesNotMatch(container.textContent, /\b0\b/, "件数不明のときに 0 とは出さない")
+})
+
+// ---- コメントの並び替え（v89） ----
+//
+// ★ 選択肢の文言はYouTubeの表示をそのまま出す（自前で訳さない）。選択状態は
+//   メイン画面の aria-selected 由来なので、サブ画面は言語を気にしない。
+const sortState = (selectedIndex = 0) => ({
+  available: true,
+  options: [
+    { id: "o0", label: "人気順", hint: "注目のコメントを表示", selected: selectedIndex === 0 },
+    { id: "o1", label: "新しい順", hint: "最近のコメントを表示します", selected: selectedIndex === 1 }
+  ]
+})
+
+async function renderSort(t, sort, busy = false) {
+  const container = document.body.appendChild(document.createElement("div"))
+  const root = createRoot(container)
+  t.after(async () => { await act(async () => root.unmount()); container.remove() })
+  const chosen = []
+  await act(async () => {
+    root.render(React.createElement(testing.CommentSortControl, {
+      sort, busy, onSelect: (option) => chosen.push(option), t: getDictionary("ja")
+    }))
+  })
+  const button = (label) => [...container.querySelectorAll("button")]
+    .find((b) => b.textContent.trim() === label)
+  const press = async (label) => {
+    await act(async () => {
+      button(label).dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+  }
+  return { container, button, press, chosen }
+}
+
+test("the sort control shows YouTube's own wording and marks the active one", async (t) => {
+  const { button, container } = await renderSort(t, sortState(0))
+  assert.ok(button("人気順"), "YouTubeの文言をそのまま出す")
+  assert.ok(button("新しい順"))
+  assert.equal(button("人気順").getAttribute("aria-pressed"), "true")
+  assert.equal(button("新しい順").getAttribute("aria-pressed"), "false")
+  assert.equal(button("人気順").getAttribute("title"), "注目のコメントを表示", "説明もYouTubeのもの")
+  assert.equal(container.querySelectorAll("a").length, 0, "サブ画面側にリンクは作らない")
+})
+
+test("pressing a sort option hands the whole option to the main window", async (t) => {
+  const { press, chosen } = await renderSort(t, sortState(0))
+  await press("新しい順")
+  assert.equal(chosen.length, 1)
+  assert.deepEqual({ id: chosen[0].id, label: chosen[0].label }, { id: "o1", label: "新しい順" })
+})
+
+test("no sort control is shown when the main window offers nothing to choose", async (t) => {
+  for (const sort of [{ available: false, options: [] }, { available: true, options: [sortState(0).options[0]] }]) {
+    const { container } = await renderSort(t, sort)
+    assert.equal(container.querySelectorAll("button").length, 0, "選べないなら出さない")
+  }
+})
+
+test("the sort control is disabled while a switch is in flight", async (t) => {
+  const { button } = await renderSort(t, sortState(0), true)
+  assert.equal(button("新しい順").disabled, true, "連打で何度も読み直させない")
 })

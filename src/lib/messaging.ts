@@ -128,6 +128,24 @@ export interface ChannelState {
  * ★ `iconPath` は YouTube のアイコン `<svg>` の中にある `<path d>` の値だけ。
  *   HTMLは持ち込まない（D-15と同じ理由）。受け取り側は自前の `<svg>` に `d` として渡す。
  */
+/**
+ * コメントの並び替えの選択肢。文言はYouTubeの表示をそのまま運ぶ（自前で訳さない）。
+ * ★ 選択状態は aria-selected 由来で、表示言語に依存しない。
+ */
+export interface CommentSortOption {
+  /** 位置由来の安定キー（"o0" など）。ズレたときは label で引き直す */
+  id: string
+  label: string
+  /** 「注目のコメントを表示」などの説明。無ければ空 */
+  hint: string
+  selected: boolean
+}
+export interface CommentSortState {
+  available: boolean
+  options: CommentSortOption[]
+}
+export const EMPTY_COMMENT_SORT: CommentSortState = { available: false, options: [] }
+
 export interface GuideEntry {
   id: string          // 位置ベースの目印 "s1:e4"。ズレたときは href / title で引き直す
   title: string       // YouTubeの表示文言のまま
@@ -237,6 +255,15 @@ export type Contract = {
   // サイドバーの中身を読む。まだ組み立てられていなければ、メイン画面のドロワーを
   // 見えないように一度だけ開いて組み立てさせる（時間がかかるので非同期）。
   DOM_FETCH_GUIDE: { req: void; res: GuideState }
+  // コメントの並び替え。取得と切り替え。
+  // ★ 切り替えるとYouTubeは**同じスレッド要素を使い回して中身だけ書き換える**
+  //   （2026-11-09 実測: 旧要素20件がDOMに残り、idも18件が重複）。既読集合を抱えたまま
+  //   だと新しい順序を取り込めないため、CS側は動画が変わったときと同じく feed を作り直す。
+  DOM_FETCH_COMMENT_SORT: { req: void; res: CommentSortState }
+  COMMENT_SORT_SELECT: {
+    req: { id: string; label: string }
+    res: { ok: boolean; sort: CommentSortState }
+  }
   // サイドバーの項目を押す。遷移も「もっと見る」の展開も YouTube 自身にさせるので、
   // 押した後の一覧を読み直して一緒に返す（サブ画面はそれで描き直す）。
   GUIDE_ACTIVATE: {

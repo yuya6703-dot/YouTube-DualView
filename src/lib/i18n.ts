@@ -133,6 +133,9 @@ export interface Dictionary {
   count: (n: number) => string
   /** 件数が読めないときの返信トグルの文言 */
   showReplies: string
+  /** 並び替えコントロールの説明（選択肢の文言はYouTubeのものをそのまま出す） */
+  sortLabel: string
+  sortOptionLabel: (name: string) => string
   replyAction: string
   replyPlaceholder: string
   repliesUnavailable: string
@@ -313,6 +316,8 @@ const ja: Dictionary = {
     : n.toLocaleString("ja-JP"),
   // 件数が読めないときの表示。YouTube自身の文言に合わせる
   showReplies: "返信を表示",
+  sortLabel: "並び替え",
+  sortOptionLabel: (name) => `並び替え: ${name}`,
   replyAction: "返信する",
   replyPlaceholder: "返信を入力",
   repliesUnavailable: "返信を取得できませんでした",
@@ -488,6 +493,8 @@ const en: Dictionary = {
     : n >= 1_000 ? shortCount(n, 1_000, "K")
     : n.toLocaleString("en-US"),
   showReplies: "Show replies",
+  sortLabel: "Sort",
+  sortOptionLabel: (name) => `Sort: ${name}`,
   replyAction: "Reply",
   replyPlaceholder: "Add a reply",
   repliesUnavailable: "Couldn't load replies",

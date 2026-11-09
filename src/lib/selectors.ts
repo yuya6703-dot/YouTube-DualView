@@ -291,6 +291,22 @@ export const SELECTORS = {
    *   チャンネルの項目はアイコンを持たず `yt-img-shadow img#img` にアイコン画像が入る。
    *   どちらも持たない項目（「ショート」等）があるので、両方とも無いことを異常としない。
    */
+  // コメントの並び替え（人気順／新しい順）。
+  // ★ 2026-11-09 実測: ytd-comments-header-renderer > #title > #additional-section >
+  //   span#sort-menu > yt-dropdown-menu > tp-yt-paper-menu-button。
+  //   選択肢は**メニューを開かなくても既にDOMにある**（tp-yt-paper-listbox の中の
+  //   `<a aria-selected>`）。そのまま click() すると切り替わり、ドロップダウンは
+  //   非表示のまま（offsetParent が null）なので**メイン画面には何も出ない**。
+  //   サイドバー(v84)のような「見えないように開く」細工は要らない。
+  // ★ 現在どれが選ばれているかは `aria-selected` で分かる。文言は見ない（言語非依存）。
+  // ★ ラベルは `#item-with-badge .item`、説明は `#subtitle`
+  //   （「注目のコメントを表示」「スパムである可能性があるコメントを含む…」）。
+  commentSort: {
+    root: ["yt-sort-filter-sub-menu-renderer", "#sort-menu"],
+    option: ["tp-yt-paper-listbox a[aria-selected]", "a[aria-selected]"],
+    optionLabel: ["#item-with-badge .item", ".item"],
+    optionHint: ["#subtitle"]
+  },
   guide: {
     root: ["ytd-guide-renderer"],
     drawer: ["tp-yt-app-drawer#guide"],
@@ -674,7 +690,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 88
+export const DIAGNOSE_VERSION = 89
 
 export type DiagnoseReport = {
   v: number
