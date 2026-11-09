@@ -2995,6 +2995,81 @@ const UNSUBSCRIBE_MENU_TIMEOUT_MS = 2000
 /** 解除が反映されるまでの試行回数（1回 = 125ms）。確認ダイアログの分も含めて余裕を持たせる。 */
 const UNSUBSCRIBE_ATTEMPTS = 24
 
+/** ポップアップの殻。これ自身が閉じていれば中身も閉じている。 */
+const OVERLAY_HOST_SELECTOR =
+  "tp-yt-paper-dialog, tp-yt-iron-dropdown, [role='dialog'], yt-sheet-view-model, yt-dialog-view-model"
+
+/**
+ * いま画面に出ているか。
+ *
+ * ★ 2026-11-10 実測: YouTube はメニューもダイアログも**使い回し、閉じても要素を残す**
+ *   （中の確定ボタンまで残る）。そのため「要素があるか」では判断できない。
+ *   閉=`aria-hidden="true"`（実測）。`hidden` 属性と `display:none` も閉じている印として見る
+ *   （閉じたドロップダウンは実測で `display:none` だった）。
+ *   矩形(getClientRects)は使わない。実ブラウザでは有効な手がかりだが、jsdom には
+ *   レイアウトが無く常に0になるため、検査で確かめられない判定になってしまう。
+ *   `opened` 属性は開いていても付かず、`offsetParent` は position:fixed のため常に null、
+ *   `checkVisibility()` はアニメーション中に揺れるので、どれも使わない。
+ * ★ 祖先は**殻まで**しか見ない。modal を開くと YouTube は背後のアプリ全体に
+ *   `aria-hidden="true"` を付けることがあり、根まで遡ると開いているダイアログまで
+ *   「閉じている」と誤判定してしまう。
+ */
+function isVisibleOverlay(el: Element): boolean {
+  const closed = (node: Element) =>
+    node.getAttribute("aria-hidden") === "true" ||
+    node.hasAttribute("hidden") ||
+    node.ownerDocument.defaultView?.getComputedStyle(node).display === "none"
+  if (closed(el)) return false
+  // ★ closest() は自分自身も返すので、必ず親から上だけを見る。
+  //   殻にあたる要素（dialog/dropdown）だけを辿る＝背後のアプリ全体に付く aria-hidden に
+  //   引っかからない。
+  for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+    if (parent.matches(OVERLAY_HOST_SELECTOR) && closed(parent)) return false
+  }
+  return true
+}
+
+/** 候補を上から試し、いま開いているものだけを返す。 */
+function findOpenOverlay(candidates: readonly string[]): HTMLElement | null {
+  for (const selector of candidates) {
+    for (const el of document.querySelectorAll<HTMLElement>(selector)) {
+      if (isVisibleOverlay(el)) return el
+    }
+  }
+  return null
+}
+
+const isPressable = (el: HTMLElement) =>
+  !el.matches(":disabled, [disabled], [aria-disabled='true']") && !el.hasAttribute("hidden")
+
+/**
+ * 確認ダイアログの「確定」ボタン。
+ *
+ * ★ まず id（`#confirm-button`）で引く。世代が変わって id が無い場合に備え、
+ *   「取り消す側を除いた、押せるボタンのうち最後のもの」へ落とす。
+ *   実測の並びは cancel →（非表示の checkbox 版）→ confirm で、YouTube は確定を最後に置く。
+ *   外しても最悪「取り消す」を押すだけで、登録状態は変わらない（成否は属性で確かめる）。
+ */
+function findConfirmButton(dialog: HTMLElement): HTMLElement | null {
+  const byId = q<HTMLElement>(SELECTORS.meta.confirmDialogConfirm, dialog)
+  if (byId && isPressable(byId)) return byId
+  const cancels = [...dialog.querySelectorAll(SELECTORS.meta.confirmDialogCancel.join(","))]
+  const pressable = [...dialog.querySelectorAll<HTMLElement>("button, [role='button']")]
+    .filter((el) => isPressable(el) && !cancels.some((cancel) => cancel.contains(el)))
+  return pressable[pressable.length - 1] ?? null
+}
+
+/** 失敗したときの手がかり。要素名とidだけを載せる（ページの文章は載せない）。 */
+function overlayOutline(el: Element | null): string {
+  if (!el) return "none"
+  const name = (node: Element) => node.tagName.toLowerCase() + (node.id ? "#" + node.id : "")
+  const ids = [...el.querySelectorAll("[id]")]
+    .map((node) => "#" + node.id)
+    .filter((id) => /confirm|cancel|button/i.test(id))
+    .slice(0, 6)
+  return `${name(el)}[${ids.join(",") || "no-ids"}]`
+}
+
 /**
  * 自分が開いたメニューやダイアログを閉じる。
  * ★ メイン画面は全画面視聴中のことがあるので、失敗しても開いたままにしない。
@@ -3002,8 +3077,8 @@ const UNSUBSCRIBE_ATTEMPTS = 24
  */
 function dismissOpenOverlay() {
   const overlay =
-    q<HTMLElement>(SELECTORS.meta.confirmDialog) ??
-    q<HTMLElement>(SELECTORS.meta.subscribeMenu) ??
+    findOpenOverlay(SELECTORS.meta.confirmDialog) ??
+    findOpenOverlay(SELECTORS.meta.subscribeMenu) ??
     null
   const event = () => new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true })
   overlay?.dispatchEvent(event())
@@ -3347,17 +3422,17 @@ registerHandlers({
       return { channel: before, applied: false }
     }
 
-    // ★ セレクタ側で「いま開いているメニュー」に限定してある。要素の同一性では見ない
+    // ★ 「いま開いているメニュー」だけを見る。要素の同一性では見ない
     //   （ytd-popup-container は同じ要素を使い回すため、2回目以降は必ず同一になる）。
     button.click()
     const opened = await waitUntil(() => {
-      const menu = q<HTMLElement>(SELECTORS.meta.subscribeMenu)
+      const menu = findOpenOverlay(SELECTORS.meta.subscribeMenu)
       return menu !== null && qa(SELECTORS.meta.subscribeMenuItem, menu).length > 0
     }, UNSUBSCRIBE_MENU_TIMEOUT_MS)
-    const menu = q<HTMLElement>(SELECTORS.meta.subscribeMenu)
+    const menu = findOpenOverlay(SELECTORS.meta.subscribeMenu)
     if (!opened || !menu) {
       dismissOpenOverlay()
-      return { channel: readChannelState(), applied: false }
+      return { channel: readChannelState(), applied: false, detail: "menu=" + overlayOutline(menu) }
     }
 
     // ★ 登録解除は**最後の項目**でしか見分けられない（区切りもグループも無く、
@@ -3371,7 +3446,7 @@ registerHandlers({
       target.getAttribute("aria-selected") === "true"
     ) {
       dismissOpenOverlay()
-      return { channel: readChannelState(), applied: false }
+      return { channel: readChannelState(), applied: false, detail: `items=${items.length}:last-is-selected` }
     }
     target.click()
 
@@ -3380,6 +3455,7 @@ registerHandlers({
     //   「subscribed が消えたか」だけで成否を決める。
     let applied = false
     let confirmed = false
+    let seenDialog: HTMLElement | null = null
     for (let attempt = 0; attempt < UNSUBSCRIBE_ATTEMPTS && !applied; attempt++) {
       await new Promise((resolve) => window.setTimeout(resolve, 125))
       if (getVideoId() !== videoId) break
@@ -3388,13 +3464,16 @@ registerHandlers({
         break
       }
       if (!confirmed) {
-        // ★ 「開いている」ダイアログだけを見る。閉じた残骸にも #confirm-button は残っており、
+        // ★ 「いま開いている」ダイアログだけを見る。閉じた残骸にも確定ボタンは残っており、
         //   それを押しても何も起きないのに「押した」ことにしてしまう（v0.1.22 の不具合）。
-        const dialog = q<HTMLElement>(SELECTORS.meta.confirmDialog)
-        const confirm = dialog && q<HTMLElement>(SELECTORS.meta.confirmDialogConfirm, dialog)
-        if (confirm && !confirm.matches(":disabled, [disabled], [aria-disabled='true']")) {
-          confirm.click()
-          confirmed = true
+        const dialog = findOpenOverlay(SELECTORS.meta.confirmDialog)
+        if (dialog) {
+          seenDialog = dialog
+          const confirm = findConfirmButton(dialog)
+          if (confirm) {
+            confirm.click()
+            confirmed = true
+          }
         }
       }
     }
@@ -3403,7 +3482,11 @@ registerHandlers({
     //   メニューやダイアログが残ると映像を覆ってしまう。
     if (!applied) dismissOpenOverlay()
     pushStatus()
-    return { channel: readChannelState(), applied }
+    return {
+      channel: readChannelState(),
+      applied,
+      ...(applied ? {} : { detail: `confirmed=${confirmed} dialog=${overlayOutline(seenDialog)}` })
+    }
   },
   CHANNEL_SUBSCRIBE: async () => {
     const videoId = getVideoId()

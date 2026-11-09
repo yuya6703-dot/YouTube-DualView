@@ -1735,3 +1735,101 @@ test("subscribing still refuses to touch an already-subscribed channel", async (
   assert.equal(res.applied, false)
   assert.deepEqual(pressed, [], "登録の要求は解除の入口にならない（v80 からの性質）")
 })
+
+// ---- 作りの違うダイアログでも効くこと（v92） ----
+//
+// ★ 2026-11-10 ユーザー報告「残ってる」。こちらのブラウザでは
+//   tp-yt-paper-dialog > yt-confirm-dialog-renderer（#confirm-button あり）だったが、
+//   実機では確認ダイアログが残ったままだった。v0.1.23 は置き場所を
+//   ytd-popup-container の中に、開閉をセレクタの :not([aria-hidden]) に頼って限定しており、
+//   作りが違うと**何も見つけられない**。候補を広く挙げ、開閉はコードで判定する形に変えた。
+//   ここでは id を持たない新世代ふうのダイアログを置いて、確定が押せることを固定する。
+
+/** id を持たない世代のダイアログ（ボタンの並びだけが手がかり）。 */
+const sheetDialogHtml = (ariaHidden) => `
+  <yt-sheet-view-model role="dialog" aria-hidden="${ariaHidden}">
+    <yt-dialog-view-model>
+      <div class="actions">
+        <button class="cancel">キャンセル</button>
+        <button class="confirm">登録解除</button>
+      </div>
+    </yt-dialog-view-model>
+  </yt-sheet-view-model>`
+
+function stubSheetFlow(h, { appliesOnConfirm = true, dialogDelayMs = 400 } = {}) {
+  const host = h.doc.querySelector("ytd-subscribe-button-renderer")
+  const popup = h.doc.querySelector("ytd-popup-container")
+  const pressed = []
+  const wired = new Set()
+  const closeAll = () => {
+    for (const el of popup.querySelectorAll("tp-yt-iron-dropdown, yt-sheet-view-model")) {
+      el.setAttribute("aria-hidden", "true")
+    }
+  }
+  const wire = (el, fn) => { if (!wired.has(el)) { wired.add(el); el.addEventListener("click", fn) } }
+  host.querySelector("button").addEventListener("click", () => {
+    closeAll()
+    const existing = popup.querySelector("tp-yt-iron-dropdown")
+    if (existing) existing.setAttribute("aria-hidden", "false")
+    else popup.insertAdjacentHTML("beforeend", menuHtml())
+    for (const item of popup.querySelectorAll("tp-yt-iron-dropdown:not([aria-hidden='true']) ytd-menu-service-item-renderer")) {
+      wire(item, () => {
+        pressed.push(item.textContent.trim())
+        if (item.textContent.trim() !== "登録解除") return
+        closeAll()
+        h.win.setTimeout(() => {
+          const sheet = popup.querySelector("yt-sheet-view-model")
+          if (sheet) sheet.setAttribute("aria-hidden", "false")
+          else popup.insertAdjacentHTML("beforeend", sheetDialogHtml("false"))
+          const open = popup.querySelector("yt-sheet-view-model:not([aria-hidden='true'])")
+          wire(open.querySelector("button.cancel"), () => pressed.push("cancel"))
+          wire(open.querySelector("button.confirm"), () => {
+            pressed.push("confirm")
+            closeAll()
+            if (appliesOnConfirm) host.removeAttribute("subscribed")
+          })
+        }, dialogDelayMs)
+      })
+    }
+  })
+  return pressed
+}
+
+test("a confirmation dialog built without ids is still answered", async (t) => {
+  const h = setup(t, subscribePage(true))
+  h.start()
+  const pressed = stubSheetFlow(h)
+  const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
+  assert.deepEqual(pressed, ["登録解除", "confirm"], "取り消す側ではなく確定の方を押す")
+  assert.equal(res.applied, true)
+  assert.equal(res.channel.subscribed, false)
+})
+
+test("a leftover dialog of that generation is ignored too", async (t) => {
+  const h = setup(t, subscribePage(true))
+  h.start()
+  // 前回の残骸（閉じたまま）を先に置いておく
+  h.doc.querySelector("ytd-popup-container").insertAdjacentHTML("beforeend", sheetDialogHtml("true"))
+  const popup = h.doc.querySelector("ytd-popup-container")
+  const sheet = popup.querySelector("yt-sheet-view-model")
+  const stateWhenPressed = []
+  popup.querySelector("button.confirm")
+    .addEventListener("click", () => stateWhenPressed.push(sheet.getAttribute("aria-hidden")))
+
+  const pressed = stubSheetFlow(h)
+  const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
+  assert.ok(!stateWhenPressed.includes("true"), "閉じているうちは押さない")
+  assert.deepEqual(pressed, ["登録解除", "confirm"])
+  assert.equal(res.applied, true)
+})
+
+test("a failed unsubscribe says what it saw, so a different build can be diagnosed", async (t) => {
+  const h = setup(t, subscribePage(true))
+  h.start()
+  stubSheetFlow(h, { appliesOnConfirm: false })
+  const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
+  assert.equal(res.applied, false)
+  assert.match(res.detail, /confirmed=true/, "確定を押したかどうかが分かる")
+  assert.match(res.detail, /yt-sheet-view-model/, "どのダイアログを見たかが分かる")
+  assert.doesNotMatch(res.detail, /登録解除|キャンセル/, "ページの文章は載せない")
+})

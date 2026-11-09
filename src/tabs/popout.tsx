@@ -1656,7 +1656,10 @@ function VideoActions({
     setConfirmingUnsubscribe(false)
     if (isErr(res)) setSubscribeError(t.errCommMain)
     else if (!res.data.applied) {
-      setSubscribeError(unsubscribing ? t.errUnsubscribeFailed : t.errSubscribeFailed)
+      // ★ 失敗時は CS が見たものを小さく添える（返信の "(timeout)" と同じ考え方）。
+      //   環境差で動かないときに、何を見たのかが分かるようにするため。
+      const detail = unsubscribing && "detail" in res.data && res.data.detail ? ` (${res.data.detail})` : ""
+      setSubscribeError((unsubscribing ? t.errUnsubscribeFailed : t.errSubscribeFailed) + detail)
     }
   }
 

@@ -255,7 +255,12 @@ export type Contract = {
   // ★ 解除は登録とは**別の要求**にしてある。同じ要求で兼ねると「登録したいだけ」の操作が
   //   解除の入口になり得るため（この性質は v80 から守られている）。
   //   登録済みでなければ何もしない＝これが登録の入口にもならない。
-  CHANNEL_UNSUBSCRIBE: { req: void; res: { channel: ChannelState | null; applied: boolean } }
+  // ★ detail は失敗したときの手がかり（要素名とidだけ。ページの文章は載せない）。
+  //   サブ画面がそのまま小さく出すので、環境差で動かないときに何を見たかが分かる。
+  CHANNEL_UNSUBSCRIBE: {
+    req: void
+    res: { channel: ChannelState | null; applied: boolean; detail?: string }
+  }
   // サイドバーの中身を読む。まだ組み立てられていなければ、メイン画面のドロワーを
   // 見えないように一度だけ開いて組み立てさせる（時間がかかるので非同期）。
   DOM_FETCH_GUIDE: { req: void; res: GuideState }

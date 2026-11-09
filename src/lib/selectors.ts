@@ -89,9 +89,14 @@ export const SELECTORS = {
     //   aria-hidden="true"・矩形0、同時に開いていた共有ダイアログは属性なし・矩形1だった。
     //   `opened` 属性は開いていても付かず、checkVisibility() はアニメーション中に揺れるので
     //   どちらも使わない。
+    // ★ 候補は**広く**挙げ、「いま開いているか」はコード側(isVisibleOverlay)で決める。
+    //   v0.1.23 はセレクタに `:not([aria-hidden='true'])` を書き、置き場所も
+    //   ytd-popup-container の中に限定したため、作りが違う環境では**何も見つけられなかった**。
     subscribeMenu: [
-      "ytd-popup-container tp-yt-iron-dropdown:not([aria-hidden='true']) ytd-menu-popup-renderer",
-      "ytd-popup-container tp-yt-iron-dropdown:not([aria-hidden='true'])"
+      "ytd-popup-container ytd-menu-popup-renderer",
+      "ytd-popup-container tp-yt-iron-dropdown",
+      "tp-yt-iron-dropdown ytd-menu-popup-renderer",
+      "ytd-menu-popup-renderer"
     ],
     subscribeMenuItem: [
       "tp-yt-paper-listbox#items > ytd-menu-service-item-renderer",
@@ -105,10 +110,18 @@ export const SELECTORS = {
     //   v0.1.22 はここを `yt-confirm-dialog-renderer` だけで引いていたため、前回の残骸の
     //   死んだ確認ボタンを押して「押した」ことにしてしまい、本物のダイアログが放置された
     //   （ユーザー報告「自動的にはいを選んでほしい」の原因）。
+    // 解除の確認ダイアログ。世代差（旧 yt-confirm-dialog-renderer / 新 *-view-model）を
+    // 吸収するため候補を広く挙げ、開閉は isVisibleOverlay() で絞る。
     confirmDialog: [
-      "ytd-popup-container tp-yt-paper-dialog:not([aria-hidden='true']) yt-confirm-dialog-renderer",
-      "ytd-popup-container tp-yt-paper-dialog:not([aria-hidden='true'])"
+      "yt-confirm-dialog-renderer",
+      "yt-confirm-dialog-view-model",
+      "tp-yt-paper-dialog",
+      "yt-sheet-view-model",
+      "yt-dialog-view-model",
+      "[role='dialog']"
     ],
+    /** 確認ダイアログの「取り消す」側。確定ボタンを位置で選ぶときに除外する。 */
+    confirmDialogCancel: ["#cancel-button"],
     confirmDialogConfirm: ["#confirm-button button", "#confirm-button", "yt-button-shape#confirm-button button"]
   },
 
@@ -730,7 +743,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 91
+export const DIAGNOSE_VERSION = 92
 
 export type DiagnoseReport = {
   v: number
