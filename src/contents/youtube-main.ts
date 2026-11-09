@@ -1077,21 +1077,46 @@ function findCommentElementById(id: string): Element | null {
   return null
 }
 
+/** 件数表示に付く倍率。YouTubeの表示言語によって変わる（日本語は万/億、英語はK/M/B）。 */
+const COUNT_SUFFIX_MULTIPLIER: Record<string, number> = {
+  "万": 10_000,
+  "億": 100_000_000,
+  K: 1_000,
+  M: 1_000_000,
+  B: 1_000_000_000
+}
+
 /**
- * "1.2万" "3,400" のような日本語混じりの数値表示を概算のnumberに変換する。
+ * "1.2万" "3,400" "1.2K" のような件数表示を概算のnumberに変換する。
  * 読めなければ undefined（"件数不明"として表示側が"—"を出す）。
+ *
+ * ★ ここで一番やってはいけないのは **undefined ではなく誤った数を返すこと**。
+ *   以前は日本語の万/億しか知らず、英語UIの "1.2K" を Math.round(1.2) = **1** として
+ *   そのまま表示していた（2026-11-09 のレビューで発覚）。1200件のいいねが「1」と出ると、
+ *   ユーザーはそれを信じてしまう。読めない形は必ず undefined にする。
+ * ★ 倍率の文字は **数字に直接続く大文字** のときだけ採用する。`\s*` を許すと
+ *   "1 Bewertung"（ドイツ語の「1件の評価」）の B を 10億と読んでしまう。
+ *   小文字を許すと "1m"（1分前）の m を100万と読んでしまう。YouTubeの件数表示は
+ *   必ず大文字で数字に密着している（1.2K / 3.4M / 1.1B）。
+ * ★ 倍率が付かないときの "." は小数点ではなく**桁区切り**として扱う
+ *   （独・西・伊などは "1.234" で1234）。件数の表示に真の小数は現れないため、
+ *   3桁ずつ区切っている点だけを取り除く。
  */
 function parseApproxCount(raw: string): number | undefined {
   const s = raw.trim()
   if (!s) return undefined
-  const m = s.match(/([\d,.]+)\s*(万|億)?/)
+  const m = s.match(/([\d,.]+)(?:\s*(万|億)|([KMB])(?![A-Za-z]))?/)
   const digits = m?.[1]
   if (!digits) return undefined
-  const base = Number(digits.replace(/,/g, ""))
-  if (Number.isNaN(base)) return undefined
-  if (m[2] === "万") return Math.round(base * 10000)
-  if (m[2] === "億") return Math.round(base * 100000000)
-  return Math.round(base)
+  const suffix = m[2] ?? m[3] ?? ""
+  const multiplier = COUNT_SUFFIX_MULTIPLIER[suffix] ?? 1
+  const normalized =
+    multiplier === 1
+      ? digits.replace(/[,.](?=\d{3}(?:\D|$))/g, "")
+      : digits.replace(/,/g, "")
+  const value = Number(normalized)
+  if (Number.isNaN(value)) return undefined
+  return Math.round(value * multiplier)
 }
 
 /** いいねボタンの押下状態を読む。トグル系ボタンは aria-pressed で表現されることが多い */

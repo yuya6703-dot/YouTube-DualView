@@ -12,6 +12,16 @@
 
 export type Language = "ja" | "en"
 
+/**
+ * 件数を1桁の小数まで短くする。**切り捨て**る。
+ * ★ 四捨五入すると 99,999 が「10.0万」になり、10万件だと読まれてしまう。
+ *   YouTube 自身も切り捨てて 9.9万 と出す。割り切れるときは小数を付けない（1万）。
+ */
+const shortCount = (n: number, unit: number, suffix: string): string => {
+  const v = Math.floor((n / unit) * 10) / 10
+  return `${Number.isInteger(v) ? v : v.toFixed(1)}${suffix}`
+}
+
 export interface Dictionary {
   // 接続バッジ
   badgeConnected: string
@@ -119,6 +129,8 @@ export interface Dictionary {
   showFullComment: string
   showPartialComment: string
   replyCount: (n: number) => string
+  /** いいね等の件数を、その言語の見せ方で短くする */
+  count: (n: number) => string
   /** 件数が読めないときの返信トグルの文言 */
   showReplies: string
   replyAction: string
@@ -294,6 +306,11 @@ const ja: Dictionary = {
   showFullComment: "詳細",
   showPartialComment: "一部を表示",
   replyCount: (n) => `返信 ${n}件`,
+  // YouTube と同じく切り捨てて見せる（99,999 を「10.0万」と書かない）
+  count: (n) =>
+    n >= 100_000_000 ? shortCount(n, 100_000_000, "億")
+    : n >= 10_000 ? shortCount(n, 10_000, "万")
+    : n.toLocaleString("ja-JP"),
   // 件数が読めないときの表示。YouTube自身の文言に合わせる
   showReplies: "返信を表示",
   replyAction: "返信する",
@@ -465,6 +482,11 @@ const en: Dictionary = {
   showFullComment: "Show more",
   showPartialComment: "Show less",
   replyCount: (n) => `${n} ${n === 1 ? "reply" : "replies"}`,
+  count: (n) =>
+    n >= 1_000_000_000 ? shortCount(n, 1_000_000_000, "B")
+    : n >= 1_000_000 ? shortCount(n, 1_000_000, "M")
+    : n >= 1_000 ? shortCount(n, 1_000, "K")
+    : n.toLocaleString("en-US"),
   showReplies: "Show replies",
   replyAction: "Reply",
   replyPlaceholder: "Add a reply",

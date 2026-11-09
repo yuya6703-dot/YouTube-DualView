@@ -454,3 +454,43 @@ test("a comment with neither a count nor replies shows no reply toggle", async (
   const { container } = await render(t, comment("c7"))
   assert.equal([...container.querySelectorAll("button")].filter((b) => /返信 \d+件|返信を表示/.test(b.textContent)).length, 0)
 })
+
+// ---- 件数の見せ方（v88） ----
+//
+// ★ 以前は「万」を直書きしていたため、英語表示でも "1.2万" と出ていた。
+//   また四捨五入していたので 99,999 が「10.0万」になり、10万件と読まれ得た。
+//   YouTube 自身と同じく切り捨てる。
+async function renderWithDict(t, item, lang) {
+  const container = document.body.appendChild(document.createElement("ul"))
+  const root = createRoot(container)
+  t.after(async () => { await act(async () => root.unmount()); container.remove() })
+  await act(async () => {
+    root.render(React.createElement(testing.CommentRow, {
+      item, size: "md", tabId: 7, t: getDictionary(lang), settings: DEFAULT_SETTINGS, replyAvatars: {}
+    }))
+  })
+  return container
+}
+
+test("like counts are shown the way that language shows them", async (t) => {
+  const cases = [
+    ["ja", 84, "84"],
+    ["ja", 12345, "1.2万"],
+    ["ja", 99999, "9.9万"],          // 切り捨て。四捨五入すると「10.0万」になり10万件と読まれる
+    ["ja", 1100000000, "11億"],
+    ["en", 84, "84"],
+    ["en", 1234, "1.2K"],
+    ["en", 3400000, "3.4M"],
+    ["en", 1100000000, "1.1B"]
+  ]
+  for (const [lang, likeCount, want] of cases) {
+    const container = await renderWithDict(t, { ...comment("lc" + lang + likeCount), likeCount }, lang)
+    assert.ok(container.textContent.includes(want),
+      `${lang} / ${likeCount} は "${want}" と出す（実際: ${JSON.stringify(container.textContent)}）`)
+  }
+})
+
+test("an unknown like count shows nothing rather than a zero", async (t) => {
+  const container = await renderWithDict(t, comment("lcNone"), "ja")
+  assert.doesNotMatch(container.textContent, /\b0\b/, "件数不明のときに 0 とは出さない")
+})

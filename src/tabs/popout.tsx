@@ -1948,9 +1948,6 @@ function NoteRow({ note, onJump, onRemove, t }: {
   )
 }
 
-/** 件数を短く表示する。1000未満はそのまま、以上は"1.2万"のような概算にはせず単純にkカンマ区切り */
-const fmtCount = (n: number) => (n >= 10000 ? `${(n / 10000).toFixed(1)}万` : n.toLocaleString())
-
 /** 既定の祖先。トップレベルのコメントには親がいない。 */
 const EMPTY_ANCESTORS: readonly string[] = []
 
@@ -2199,7 +2196,7 @@ function CommentRow({ item, size, tabId, t, settings, replyAvatars, isReply = fa
               liked ? "text-red-500" : "text-neutral-500 hover:text-neutral-300"
             }`}>
             <ThumbsUp size={12} fill={liked ? "currentColor" : "none"} />
-            {likeCount !== undefined && likeCount > 0 && <span className="tabular-nums">{fmtCount(likeCount)}</span>}
+            {likeCount !== undefined && likeCount > 0 && <span className="tabular-nums">{t.count(likeCount)}</span>}
           </button>
 
           {settings.deeplApiKey.trim() !== "" && (

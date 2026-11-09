@@ -1357,3 +1357,58 @@ test("a comment written for the video on screen still goes through the normal pa
   assert.equal(result.reason, undefined, "動画が一致していれば video-changed にはしない")
   assert.equal(placeholderClicks, 1, "通常どおり投稿欄を開きにいく")
 })
+
+// ---- 件数の読み取り（v88） ----
+//
+// ★ 一番やってはいけないのは undefined ではなく**誤った数**を返すこと。
+//   以前は日本語の万/億しか知らず、英語UIの "1.2K" を Math.round(1.2) = 1 として
+//   そのまま表示していた。1200件のいいねが「1」と出ると、ユーザーはそれを信じてしまう。
+const threadWithLike = (id, label) => `
+  <ytd-comment-thread-renderer>
+    <div id="comment-container"><ytd-comment-view-model>
+      <a id="author-text">Author</a>
+      <div id="author-thumbnail"><img src="https://yt3.ggpht.com/avatar.jpg"></div>
+      <span id="published-time-text"><a href="/watch?v=current&lc=${id}">1 day ago</a></span>
+      <div id="content-text">Comment ${id}</div>
+      <div id="like-button"><button aria-label="${label}"></button></div>
+    </ytd-comment-view-model></div>
+  </ytd-comment-thread-renderer>`
+
+test("comment like counts are read correctly whatever language YouTube is showing", async (t) => {
+  const cases = [
+    ["高く評価 1,234 件", 1234],            // 日本語・桁区切り
+    ["1.2万 人が高く評価しました", 12000],   // 日本語・万
+    ["3.4億", 340000000],                   // 日本語・億
+    ["1.2K", 1200],                         // 英語・K（以前は 1 になっていた）
+    ["3.4M", 3400000],                      // 英語・M（以前は 3）
+    ["1.1B", 1100000000],                   // 英語・B（以前は 1）
+    ["1.234", 1234],                        // 独・西・伊の桁区切り（以前は 1）
+    ["1 Bewertung", 1],                     // 「B」は倍率ではない（10億にしない）
+    ["1m ago", 1]                           // 小文字の m は倍率ではない（100万にしない）
+  ]
+  const html = cases.map(([label], i) => threadWithLike(`c${i}`, label)).join("")
+  const h = setup(t, section(html))
+  h.start()
+  await h.advance(1200)
+  const items = Array.from(h.api.items())
+  assert.equal(items.length, cases.length)
+  cases.forEach(([label, want], i) => {
+    assert.equal(items[i].likeCount, want, `${JSON.stringify(label)} は ${want} と読む`)
+  })
+})
+
+test("an unreadable count is left unknown rather than shown as a wrong number", async (t) => {
+  const h = setup(t, section(threadWithLike("c0", "高く評価") + threadWithLike("c1", "")))
+  h.start()
+  await h.advance(1200)
+  for (const item of h.api.items()) {
+    assert.equal(item.likeCount, undefined, "数字が無いなら件数不明（表示側が — を出す）")
+  }
+})
+
+test("a reply count written in English is read as the real number", async (t) => {
+  const h = setup(t, section(threadWithReplies("parent", 2).replace("2 件の返信", "1.2K replies")))
+  h.start()
+  await h.advance(1200)
+  assert.equal(Array.from(h.api.items())[0].replyCount, 1200)
+})
