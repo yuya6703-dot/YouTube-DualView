@@ -81,9 +81,17 @@ export const SELECTORS = {
     //   **位置（最後の項目）でしか見分けられない**。危うさは呼び出し側で埋める
     //   （自分のクリックで開いたメニューだけを読む／選択中の通知設定は押さない／
     //   最後に subscribed 属性が消えたかで成否を判定する）。
+    // ★ 2026-11-10 実測: ytd-popup-container は**メニューもダイアログも使い回す**。
+    //   閉じても要素はDOMに残り続ける（キャンセル後も ytd-menu-popup-renderer と
+    //   yt-confirm-dialog-renderer がそのまま残り、死んだ #confirm-button まで持っている）。
+    //   そのため「要素があるか」で判断してはいけない。**いま開いているか**で引く。
+    //   開閉の印は `aria-hidden`（閉="true" / 開=属性なし）。実測で、閉じた確認ダイアログは
+    //   aria-hidden="true"・矩形0、同時に開いていた共有ダイアログは属性なし・矩形1だった。
+    //   `opened` 属性は開いていても付かず、checkVisibility() はアニメーション中に揺れるので
+    //   どちらも使わない。
     subscribeMenu: [
-      "ytd-popup-container tp-yt-iron-dropdown ytd-menu-popup-renderer",
-      "ytd-popup-container ytd-menu-popup-renderer"
+      "ytd-popup-container tp-yt-iron-dropdown:not([aria-hidden='true']) ytd-menu-popup-renderer",
+      "ytd-popup-container tp-yt-iron-dropdown:not([aria-hidden='true'])"
     ],
     subscribeMenuItem: [
       "tp-yt-paper-listbox#items > ytd-menu-service-item-renderer",
@@ -93,7 +101,14 @@ export const SELECTORS = {
     // 解除の確認ダイアログ。★ **実機未確認**（確認まで進めるとユーザーのアカウントで
     //   実際に解除が走るため測っていない）。出る世代と出ない世代の両方を扱えるよう、
     //   「出たら押す」「出なければ属性の変化を待つ」の両対応にしてある。
-    confirmDialog: ["yt-confirm-dialog-renderer", "tp-yt-paper-dialog[opened]"],
+    // ★ 閉じた残骸を掴まないよう、必ず「開いている tp-yt-paper-dialog の中」に限定する。
+    //   v0.1.22 はここを `yt-confirm-dialog-renderer` だけで引いていたため、前回の残骸の
+    //   死んだ確認ボタンを押して「押した」ことにしてしまい、本物のダイアログが放置された
+    //   （ユーザー報告「自動的にはいを選んでほしい」の原因）。
+    confirmDialog: [
+      "ytd-popup-container tp-yt-paper-dialog:not([aria-hidden='true']) yt-confirm-dialog-renderer",
+      "ytd-popup-container tp-yt-paper-dialog:not([aria-hidden='true'])"
+    ],
     confirmDialogConfirm: ["#confirm-button button", "#confirm-button", "yt-button-shape#confirm-button button"]
   },
 
@@ -715,7 +730,7 @@ export function sampleOutlines(root: ParentNode = document): Record<string, stri
  *   それに気づかないまま古い結果を新しい結果だと思い込む事故が起きる。
  *   バージョンを画面に出せば一目で判別できる。
  */
-export const DIAGNOSE_VERSION = 90
+export const DIAGNOSE_VERSION = 91
 
 export type DiagnoseReport = {
   v: number

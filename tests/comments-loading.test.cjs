@@ -1522,39 +1522,101 @@ test("a sort option that moved is found again by its label", async (t) => {
   assert.deepEqual(pressed, ["新しい順"], "位置がズレていても文言で引き直す")
 })
 
-// ---- チャンネル登録の解除（v90） ----
+// ---- チャンネル登録の解除（v90 / v91 で実測に合わせ直し） ----
 //
-// ★ 2026-11-10 実測: 登録済みのボタンを押すと ytd-popup-container の中に
-//   tp-yt-paper-listbox#items が作られ、ytd-menu-service-item-renderer が4つ並ぶ
-//   （すべて / カスタマイズされた通知のみ / なし / 登録解除）。区切りもグループも無く、
-//   aria-selected は通知側で一貫しない。文言は言語依存。よって**最後の項目**でしか
-//   見分けられないため、危うさは呼び出し側の3つの仕掛けで埋めている。
-/** 既存の subscribeArea（実機に忠実）に、メニューの置き場所だけ足す。 */
-const subscribePage = (subscribed) =>
-  subscribeArea({ subscribed }) + "<ytd-popup-container></ytd-popup-container>"
+// ★ 2026-11-10 実測。ここの fixture は実際の watch ページの形をそのまま写している:
+//   - 登録済みのボタンを押すと ytd-popup-container の中に
+//     tp-yt-iron-dropdown > ytd-menu-popup-renderer > tp-yt-paper-listbox#items ができ、
+//     ytd-menu-service-item-renderer が4つ並ぶ（すべて/カスタマイズ/なし/登録解除）。
+//     区切りもグループも無く aria-selected は通知側で一貫しないので、**最後の項目**で引く。
+//   - 「登録解除」を押すと tp-yt-paper-dialog > yt-confirm-dialog-renderer が開き、
+//     中に yt-button-renderer#cancel-button と #confirm-button がある。
+//   - ★ **ytd-popup-container はメニューもダイアログも使い回し、閉じても残す**。
+//     閉じた残骸にも #confirm-button が残っているため、「要素があるか」で判断すると
+//     死んだボタンを押して「押した」ことにしてしまう（v0.1.22 の不具合）。
+//     開閉の印は aria-hidden（閉="true" / 開=属性なし）。
+const SORT_OF_NOTIFICATION = ["すべて", "カスタマイズされた通知のみ", "なし"]
 
-const unsubscribeMenu = (extraLast = "") => `
-  <tp-yt-iron-dropdown><ytd-menu-popup-renderer>
-    <tp-yt-paper-listbox id="items">
-      <ytd-menu-service-item-renderer aria-selected="true">すべて</ytd-menu-service-item-renderer>
-      <ytd-menu-service-item-renderer aria-selected="false" is-selected>カスタマイズされた通知のみ</ytd-menu-service-item-renderer>
-      <ytd-menu-service-item-renderer aria-selected="false">なし</ytd-menu-service-item-renderer>
+const menuHtml = (extraLast = "") => `
+  <tp-yt-iron-dropdown aria-hidden="false"><div id="contentWrapper">
+    <ytd-menu-popup-renderer><tp-yt-paper-listbox id="items">
+      <ytd-menu-service-item-renderer aria-selected="true">${SORT_OF_NOTIFICATION[0]}</ytd-menu-service-item-renderer>
+      <ytd-menu-service-item-renderer aria-selected="false" is-selected>${SORT_OF_NOTIFICATION[1]}</ytd-menu-service-item-renderer>
+      <ytd-menu-service-item-renderer aria-selected="false">${SORT_OF_NOTIFICATION[2]}</ytd-menu-service-item-renderer>
       <ytd-menu-service-item-renderer aria-selected="false">登録解除</ytd-menu-service-item-renderer>
       ${extraLast}
-    </tp-yt-paper-listbox>
-  </ytd-menu-popup-renderer></tp-yt-iron-dropdown>`
+    </tp-yt-paper-listbox></ytd-menu-popup-renderer>
+  </div></tp-yt-iron-dropdown>`
 
-/** 登録済みのボタンを押すとメニューが開く YouTube を再現する。 */
-function stubSubscribeMenu(h, { onUnsubscribe, extraLast = "" } = {}) {
+const dialogHtml = (ariaHidden) => `
+  <tp-yt-paper-dialog aria-hidden="${ariaHidden}">
+    <yt-confirm-dialog-renderer>
+      <div id="main">
+        <div>
+          <yt-button-renderer id="cancel-button"><yt-button-shape><button>キャンセル</button></yt-button-shape></yt-button-renderer>
+          <yt-button-renderer id="checkbox-enabled-confirm-button"><yt-button-shape></yt-button-shape></yt-button-renderer>
+          <yt-button-renderer id="confirm-button"><yt-button-shape><button>登録解除</button></yt-button-shape></yt-button-renderer>
+        </div>
+      </div>
+    </yt-confirm-dialog-renderer>
+  </tp-yt-paper-dialog>`
+
+/** 既存の subscribeArea（実機に忠実）に、ポップアップの置き場所を足す。 */
+const subscribePage = (subscribed, staleDialog = false) =>
+  subscribeArea({ subscribed }) +
+  `<ytd-popup-container>${staleDialog ? dialogHtml("true") : ""}</ytd-popup-container>`
+
+/**
+ * 登録済みのボタンを押すとメニューが開き、「登録解除」を押すと確認ダイアログが開く
+ * YouTube を再現する。閉じるときは要素を消さず aria-hidden を立てる（実機と同じ）。
+ */
+function stubUnsubscribeFlow(h, { confirms = true, appliesOnConfirm = true, extraLast = "", dialogDelayMs = 400 } = {}) {
   const host = h.doc.querySelector("ytd-subscribe-button-renderer")
   const popup = h.doc.querySelector("ytd-popup-container")
   const pressed = []
+  const wired = new Set()
+  const closeAll = () => {
+    for (const el of popup.querySelectorAll("tp-yt-iron-dropdown, tp-yt-paper-dialog")) {
+      el.setAttribute("aria-hidden", "true")
+    }
+  }
+  /** 同じ要素には一度だけ listener を張る（実機は要素を使い回すため）。 */
+  const wire = (el, fn) => {
+    if (wired.has(el)) return
+    wired.add(el)
+    el.addEventListener("click", fn)
+  }
+  const openDialog = () => {
+    // ★ ダイアログの入れ物も使い回される。2回目以降は同じ要素を開き直すだけ。
+    const existing = popup.querySelector("tp-yt-paper-dialog")
+    if (existing) existing.setAttribute("aria-hidden", "false")
+    else popup.insertAdjacentHTML("beforeend", dialogHtml("false"))
+    const dialog = popup.querySelector("tp-yt-paper-dialog:not([aria-hidden='true'])")
+    wire(dialog.querySelector("#confirm-button button"), () => {
+      pressed.push("confirm")
+      closeAll()
+      if (appliesOnConfirm) host.removeAttribute("subscribed")
+    })
+  }
   host.querySelector("button").addEventListener("click", () => {
-    popup.innerHTML = unsubscribeMenu(extraLast)
-    for (const item of popup.querySelectorAll("ytd-menu-service-item-renderer")) {
-      item.addEventListener("click", () => {
+    closeAll()
+    // ★ 実機と同じく**入れ物を使い回す**。閉じても要素は消えず、開き直すと同じ要素が使われる
+    //   （要素の同一性で「新しく開いたか」を判断してはいけないことの再現）。
+    const existing = popup.querySelector("tp-yt-iron-dropdown")
+    if (existing) existing.setAttribute("aria-hidden", "false")
+    else popup.insertAdjacentHTML("beforeend", menuHtml(extraLast))
+    for (const item of popup.querySelectorAll("tp-yt-iron-dropdown:not([aria-hidden='true']) ytd-menu-service-item-renderer")) {
+      wire(item, () => {
         pressed.push(item.textContent.trim())
-        if (item.textContent.trim() === "登録解除") onUnsubscribe?.(host, popup)
+        if (item.textContent.trim() !== "登録解除") return
+        closeAll()
+        if (!confirms) {
+          if (appliesOnConfirm) host.removeAttribute("subscribed")
+          return
+        }
+        // ★ 実機ではダイアログは**すぐには出ない**（押してから描画されるまで間がある）。
+        //   その隙に前回の残骸を掴んでしまうのが v0.1.22 の不具合だったので、遅延を入れる。
+        h.win.setTimeout(openDialog, dialogDelayMs)
       })
     }
   })
@@ -1564,40 +1626,68 @@ function stubSubscribeMenu(h, { onUnsubscribe, extraLast = "" } = {}) {
 test("unsubscribing presses YouTube's own menu item and reports the result", async (t) => {
   const h = setup(t, subscribePage(true))
   h.start()
-  // ダイアログを出さない世代: その場で subscribed が外れる
-  const pressed = stubSubscribeMenu(h, { onUnsubscribe: (host) => host.removeAttribute("subscribed") })
+  const pressed = stubUnsubscribeFlow(h, { confirms: false })
   const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
   assert.equal(res.applied, true)
   assert.equal(res.channel.subscribed, false)
   assert.deepEqual(pressed, ["登録解除"], "押したのは最後の項目だけ（通知設定には触れない）")
 })
 
-// ★ 確認ダイアログが出る世代（実機未確認のため、出る側・出ない側の両方を検査で固定する）
-test("a confirmation dialog, if YouTube shows one, is confirmed and the result verified", async (t) => {
+test("the confirmation dialog is answered automatically", async (t) => {
   const h = setup(t, subscribePage(true))
   h.start()
-  const popup = h.doc.querySelector("ytd-popup-container")
-  stubSubscribeMenu(h, {
-    onUnsubscribe: (host) => {
-      popup.insertAdjacentHTML("beforeend", `
-        <yt-confirm-dialog-renderer>
-          <div id="cancel-button"><button>キャンセル</button></div>
-          <div id="confirm-button"><button>登録解除</button></div>
-        </yt-confirm-dialog-renderer>`)
-      popup.querySelector("#confirm-button button").addEventListener("click", () => {
-        host.removeAttribute("subscribed")
-      })
-    }
-  })
+  const pressed = stubUnsubscribeFlow(h)
   const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
-  assert.equal(res.applied, true, "ダイアログが出たら押して、最後は属性で成否を見る")
+  assert.deepEqual(pressed, ["登録解除", "confirm"], "メイン画面の確認で「はい」まで選ぶ")
+  assert.equal(res.applied, true)
   assert.equal(res.channel.subscribed, false)
+})
+
+// ★ v0.1.22 の不具合。ytd-popup-container はダイアログを**使い回し、閉じても残す**。
+//   閉じた状態の中にも #confirm-button が残っているため、「要素があるか」で引くと
+//   まだ開いていないうちに死んだボタンを押し、「押した」ことにして二度と試さない。
+//   結果、本物のダイアログが開いても放置された（報告「自動的にはいを選んでほしい」）。
+//   見るべきは「押した瞬間にそのダイアログが開いていたか」。
+test("the confirm button is only pressed while the dialog is actually open", async (t) => {
+  const h = setup(t, subscribePage(true, true)) // 前回の残骸（閉じたダイアログ）が最初からある
+  h.start()
+  const popup = h.doc.querySelector("ytd-popup-container")
+  const dialog = popup.querySelector("tp-yt-paper-dialog")
+  const stateWhenPressed = []
+  popup
+    .querySelector("#confirm-button button")
+    .addEventListener("click", () => stateWhenPressed.push(dialog.getAttribute("aria-hidden")))
+
+  const pressed = stubUnsubscribeFlow(h)
+  const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
+  assert.ok(!stateWhenPressed.includes("true"), "閉じているうちに押してはいけない")
+  assert.deepEqual(stateWhenPressed, ["false"], "開いたあとに一度だけ押す")
+  assert.deepEqual(pressed, ["登録解除", "confirm"])
+  assert.equal(res.applied, true)
+})
+
+// ★ メニューの入れ物も使い回される。要素の同一性で「新しく開いたか」を見てはいけない
+//   （2回目以降は必ず同じ要素になるため、v0.1.22 は2回目から何もできなかった）。
+test("unsubscribing works a second time on the same page", async (t) => {
+  const h = setup(t, subscribePage(true))
+  h.start()
+  const host = h.doc.querySelector("ytd-subscribe-button-renderer")
+  const pressed = stubUnsubscribeFlow(h)
+
+  const first = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
+  assert.equal(first.applied, true)
+
+  // 登録し直した状態から、同じページでもう一度
+  host.setAttribute("subscribed", "")
+  const second = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
+  assert.equal(second.applied, true, "使い回された入れ物でも2回目が通る")
+  assert.deepEqual(pressed, ["登録解除", "confirm", "登録解除", "confirm"])
 })
 
 test("a channel that is not subscribed is never touched by the unsubscribe request", async (t) => {
   const h = setup(t, subscribePage(false))
   h.start()
-  const pressed = stubSubscribeMenu(h)
+  const pressed = stubUnsubscribeFlow(h)
   const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
   assert.equal(res.applied, false)
   assert.deepEqual(pressed, [], "解除の要求が登録の入口になってはいけない")
@@ -1607,7 +1697,7 @@ test("a channel that is not subscribed is never touched by the unsubscribe reque
 test("the last menu item is left alone when it is the active notification setting", async (t) => {
   const h = setup(t, subscribePage(true))
   h.start()
-  const pressed = stubSubscribeMenu(h, {
+  const pressed = stubUnsubscribeFlow(h, {
     extraLast: '<ytd-menu-service-item-renderer aria-selected="false" is-selected>別の通知設定</ytd-menu-service-item-renderer>'
   })
   const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
@@ -1619,12 +1709,11 @@ test("the last menu item is left alone when it is the active notification settin
 test("an unsubscribe that does not take effect is reported as not applied", async (t) => {
   const h = setup(t, subscribePage(true))
   h.start()
-  // 押しても YouTube が何もしない（未ログイン等）
-  const pressed = stubSubscribeMenu(h)
+  const pressed = stubUnsubscribeFlow(h, { appliesOnConfirm: false })
   const res = await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
   assert.equal(res.applied, false, "属性が変わらなければ成功にしない")
   assert.equal(res.channel.subscribed, true)
-  assert.deepEqual(pressed, ["登録解除"])
+  assert.deepEqual(pressed, ["登録解除", "confirm"])
 })
 
 // ★ メイン画面は全画面視聴中のことがある。失敗してメニューを開いたままにすると映像を覆う。
@@ -1633,15 +1722,15 @@ test("a failed unsubscribe closes whatever it opened", async (t) => {
   h.start()
   let escapes = 0
   h.doc.addEventListener("keydown", (e) => { if (e.key === "Escape") escapes++ })
-  stubSubscribeMenu(h)
+  stubUnsubscribeFlow(h, { appliesOnConfirm: false })
   await settle(h, h.handlers.CHANNEL_UNSUBSCRIBE())
-  assert.ok(escapes > 0, "開いたメニューを閉じる")
+  assert.ok(escapes > 0, "開いたものを閉じる")
 })
 
 test("subscribing still refuses to touch an already-subscribed channel", async (t) => {
   const h = setup(t, subscribePage(true))
   h.start()
-  const pressed = stubSubscribeMenu(h)
+  const pressed = stubUnsubscribeFlow(h)
   const res = await settle(h, h.handlers.CHANNEL_SUBSCRIBE())
   assert.equal(res.applied, false)
   assert.deepEqual(pressed, [], "登録の要求は解除の入口にならない（v80 からの性質）")

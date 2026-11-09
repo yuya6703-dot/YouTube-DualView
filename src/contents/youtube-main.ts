@@ -3347,16 +3347,15 @@ registerHandlers({
       return { channel: before, applied: false }
     }
 
-    // ★ 自分のクリックで新しく開いたメニューだけを読む。たまたま別のメニューが
-    //   開いていても、それを操作しないため。
-    const menuBefore = q<HTMLElement>(SELECTORS.meta.subscribeMenu)
+    // ★ セレクタ側で「いま開いているメニュー」に限定してある。要素の同一性では見ない
+    //   （ytd-popup-container は同じ要素を使い回すため、2回目以降は必ず同一になる）。
     button.click()
     const opened = await waitUntil(() => {
       const menu = q<HTMLElement>(SELECTORS.meta.subscribeMenu)
-      return menu !== null && menu !== menuBefore && qa(SELECTORS.meta.subscribeMenuItem, menu).length > 0
+      return menu !== null && qa(SELECTORS.meta.subscribeMenuItem, menu).length > 0
     }, UNSUBSCRIBE_MENU_TIMEOUT_MS)
     const menu = q<HTMLElement>(SELECTORS.meta.subscribeMenu)
-    if (!opened || !menu || menu === menuBefore) {
+    if (!opened || !menu) {
       dismissOpenOverlay()
       return { channel: readChannelState(), applied: false }
     }
@@ -3389,6 +3388,8 @@ registerHandlers({
         break
       }
       if (!confirmed) {
+        // ★ 「開いている」ダイアログだけを見る。閉じた残骸にも #confirm-button は残っており、
+        //   それを押しても何も起きないのに「押した」ことにしてしまう（v0.1.22 の不具合）。
         const dialog = q<HTMLElement>(SELECTORS.meta.confirmDialog)
         const confirm = dialog && q<HTMLElement>(SELECTORS.meta.confirmDialogConfirm, dialog)
         if (confirm && !confirm.matches(":disabled, [disabled], [aria-disabled='true']")) {
